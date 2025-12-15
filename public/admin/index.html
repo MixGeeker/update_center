@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Update Center 管理面板</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 24px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      input { padding: 8px 10px; min-width: 320px; }
+      button { padding: 8px 12px; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+      th, td { border: 1px solid rgba(127,127,127,0.35); padding: 10px; text-align: left; }
+      th { background: rgba(127,127,127,0.15); }
+      .muted { opacity: 0.75; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(127,127,127,0.2); }
+      .danger { background: rgba(220,38,38,0.2); }
+      .ok { background: rgba(34,197,94,0.2); }
+      pre { background: rgba(127,127,127,0.12); padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h2>Update Center 管理面板</h2>
+
+    <div class="row">
+      <label>Admin Token：</label>
+      <input id="token" type="password" placeholder="Bearer Token（不会上传到服务器）" />
+      <button id="saveToken">保存</button>
+      <button id="refresh">刷新</button>
+      <span id="status" class="muted"></span>
+    </div>
+
+    <h3>当前稳定渠道</h3>
+    <pre id="stableState">(loading...)</pre>
+
+    <h3>已上传的版本（releases）</h3>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 220px">版本</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="releasesBody"></tbody>
+    </table>
+
+    <h3>日志</h3>
+    <pre id="log"></pre>
+
+    <script>
+      const elToken = document.getElementById('token')
+      const elSave = document.getElementById('saveToken')
+      const elRefresh = document.getElementById('refresh')
+      const elStatus = document.getElementById('status')
+      const elStable = document.getElementById('stableState')
+      const elBody = document.getElementById('releasesBody')
+      const elLog = document.getElementById('log')
+
+      function log(msg) {
+        const time = new Date().toISOString()
+        elLog.textContent = `[${time}] ${msg}\n` + elLog.textContent
+      }
+
+      function getToken() {
+        return (localStorage.getItem('UPDATE_ADMIN_TOKEN') || '').trim()
+      }
+
+      function setToken(token) {
+        localStorage.setItem('UPDATE_ADMIN_TOKEN', token)
+      }
+
+      async function api(path, options = {}) {
+        const token = getToken()
+        const headers = Object.assign(
+          { 'Content-Type': 'application/json' },
+          token ? { Authorization: `Bearer ${token}` } : {},
+          options.headers || {}
+        )
+
+        const res = await fetch(`/api${path}`, Object.assign({}, options, { headers }))
+        const text = await res.text()
+        let data
+        try { data = text ? JSON.parse(text) : null } catch { data = text }
+
+        if (!res.ok) {
+          throw new Error(typeof data === 'string' ? data : JSON.stringify(data))
+        }
+        return data
+      }
+
+      async function refresh() {
+        elStatus.textContent = '刷新中...'
+        try {
+          const channels = await api('/admin/channels')
+          elStable.textContent = JSON.stringify(channels.stable, null, 2)
+
+          const releases = await api('/admin/releases')
+          renderReleases(releases.versions || [])
+
+          elStatus.textContent = 'OK'
+        } catch (e) {
+          elStatus.textContent = '失败'
+          log(`ERROR: ${e.message || e}`)
+        }
+      }
+
+      function renderReleases(versions) {
+        elBody.innerHTML = ''
+        for (const v of versions) {
+          const tr = document.createElement('tr')
+
+          const tdV = document.createElement('td')
+          tdV.innerHTML = `<span class="badge">${v}</span>`
+
+          const tdA = document.createElement('td')
+          const btnPromote = document.createElement('button')
+          btnPromote.textContent = '发布到 stable'
+          btnPromote.onclick = async () => {
+            if (!confirm(`确认将 ${v} 发布到 stable？`)) return
+            try {
+              await api('/admin/channels/stable/promote', { method: 'POST', body: JSON.stringify({ version: v }) })
+              log(`Promoted stable to ${v}`)
+              await refresh()
+            } catch (e) {
+              log(`ERROR: ${e.message || e}`)
+            }
+          }
+
+          const btnRollback = document.createElement('button')
+          btnRollback.textContent = '回滚到此版本'
+          btnRollback.onclick = async () => {
+            if (!confirm(`确认将 stable 回滚到 ${v}？`)) return
+            try {
+              await api('/admin/channels/stable/rollback', { method: 'POST', body: JSON.stringify({ version: v }) })
+              log(`Rollback stable to ${v}`)
+              await refresh()
+            } catch (e) {
+              log(`ERROR: ${e.message || e}`)
+            }
+          }
+
+          tdA.appendChild(btnPromote)
+          tdA.appendChild(document.createTextNode(' '))
+          tdA.appendChild(btnRollback)
+
+          tr.appendChild(tdV)
+          tr.appendChild(tdA)
+          elBody.appendChild(tr)
+        }
+      }
+
+      elSave.onclick = () => {
+        const value = (elToken.value || '').trim()
+        setToken(value)
+        log(value ? 'Token saved' : 'Token cleared')
+      }
+
+      elRefresh.onclick = () => refresh()
+
+      // init
+      elToken.value = getToken()
+      refresh()
+    </script>
+  </body>
+</html>

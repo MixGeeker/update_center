@@ -1,0 +1,38 @@
+# ============================================
+# Update Center - Docker Compose
+# 1panel 可直接导入
+# ============================================
+
+services:
+  update-center:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: uname-update-center:latest
+    container_name: uname-update-center
+    user: "${UPDATE_CENTER_USER:-1001:1001}"
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8600}:8600"
+    env_file:
+      - .env
+    environment:
+      # 容器内固定数据目录（宿主机通过 volume 绑定到这里）
+      UPDATE_DATA_DIR: ${UPDATE_DATA_DIR:-/data/update_center/updates}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    volumes:
+      # 宿主机目录：用于 CI 上传 releases/<version>，以及面板发布 stable
+      - "${UPDATE_DATA_DIR_HOST:-/data/update_center/updates}:${UPDATE_DATA_DIR:-/data/update_center/updates}"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8600/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# ============================================
+# 常用命令
+# docker compose up -d --build
+# docker compose logs -f update-center
+# docker compose down
+# ============================================

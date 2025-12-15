@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+
+# runtime data (mounted via volume)
+data/
+
+# env files
+.env
+.env.*
+!env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# tests
+coverage/
+
+# editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript build info
+*.tsbuildinfo

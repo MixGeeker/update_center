@@ -1,0 +1,38 @@
+# dependencies
+node_modules
+
+# build outputs
+/dist
+
+# runtime data (mounted via volume)
+/data
+
+# env files (inject via env / 1panel)
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# tests
+test/
+coverage/
+*.spec.ts
+*.test.ts
+
+# editor
+.vscode/
+.idea/
+
+# git
+.git
+.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TS build info
+*.tsbuildinfo
