@@ -66,6 +66,30 @@ async function copyOrLinkDirectory(sourceDir: string, targetDir: string): Promis
   }
 }
 
+async function copyOrLinkBlockmaps(sourceDir: string, targetDir: string): Promise<void> {
+  await fs.mkdir(targetDir, { recursive: true })
+
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+
+    const name = entry.name.toLowerCase()
+    if (!name.endsWith('.blockmap')) continue
+
+    const src = join(sourceDir, entry.name)
+    const dst = join(targetDir, entry.name)
+
+    try {
+      await fs.link(src, dst)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code
+      if (code === 'EEXIST') continue
+
+      await fs.copyFile(src, dst)
+    }
+  }
+}
+
 @Injectable()
 export class AdminService {
   private readonly paths = resolveUpdateStoragePaths()
@@ -120,13 +144,6 @@ export class AdminService {
     // 先读旧状态，便于维护回滚链
     const previousState = await this.readStableState()
 
-    // 清空并重建 stable 目录
-    await fs.rm(this.paths.stableDir, { recursive: true, force: true })
-    await fs.mkdir(this.paths.stableDir, { recursive: true })
-
-    // 将 releases/<version> 的产物“硬链接/复制”到 channels/stable
-    await copyOrLinkDirectory(releaseDir, this.paths.stableDir)
-
     // 更新 stable 状态（去重、维护 previousVersions）
     const previousVersions = (previousState.previousVersions || []).filter((v) => normalizeVersion(v) !== version)
 
@@ -139,6 +156,24 @@ export class AdminService {
 
     // 限制历史长度，避免无限增长
     nextPrevious = nextPrevious.slice(0, 20)
+
+    // 清空并重建 stable 目录
+    await fs.rm(this.paths.stableDir, { recursive: true, force: true })
+    await fs.mkdir(this.paths.stableDir, { recursive: true })
+
+    // 将 releases/<version> 的产物“硬链接/复制”到 channels/stable
+    await copyOrLinkDirectory(releaseDir, this.paths.stableDir)
+
+    // 为差分更新保留历史 blockmap（仅保留体积小的 *.blockmap，不保留旧安装包）
+    for (const v of nextPrevious) {
+      const vNormalized = normalizeVersion(v)
+      if (!vNormalized) continue
+
+      const dir = join(this.paths.releasesDir, vNormalized)
+      if (!(await pathExists(dir))) continue
+
+      await copyOrLinkBlockmaps(dir, this.paths.stableDir)
+    }
 
     const nextState: StableChannelState = {
       currentVersion: version,
