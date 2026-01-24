@@ -17,6 +17,7 @@
       .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(127,127,127,0.2); }
       .danger { background: rgba(220,38,38,0.2); }
       .ok { background: rgba(34,197,94,0.2); }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(127,127,127,0.18); margin-left: 6px; }
       pre { background: rgba(127,127,127,0.12); padding: 12px; overflow: auto; }
     </style>
   </head>
@@ -28,6 +29,7 @@
       <input id="token" type="password" placeholder="Bearer Token（不会上传到服务器）" />
       <button id="saveToken">保存</button>
       <button id="refresh">刷新</button>
+      <label class="muted"><input id="forceDelete" type="checkbox" /> 强制删除（允许删除 stable 相关版本）</label>
       <span id="status" class="muted"></span>
     </div>
 
@@ -39,6 +41,8 @@
       <thead>
         <tr>
           <th style="width: 220px">版本</th>
+          <th style="width: 160px">大小</th>
+          <th style="width: 220px">状态</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -52,6 +56,7 @@
       const elToken = document.getElementById('token')
       const elSave = document.getElementById('saveToken')
       const elRefresh = document.getElementById('refresh')
+      const elForceDelete = document.getElementById('forceDelete')
       const elStatus = document.getElementById('status')
       const elStable = document.getElementById('stableState')
       const elBody = document.getElementById('releasesBody')
@@ -89,13 +94,22 @@
         return data
       }
 
+      function prettyBytes(bytes) {
+        const n = Number(bytes)
+        if (!Number.isFinite(n) || n <= 0) return '-'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let i = 0
+        let v = n
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1 }
+        return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+      }
+
       async function refresh() {
         elStatus.textContent = '刷新中...'
         try {
-          const channels = await api('/admin/channels')
+          const [channels, releases] = await Promise.all([api('/admin/channels'), api('/admin/releases/details')])
           elStable.textContent = JSON.stringify(channels.stable, null, 2)
 
-          const releases = await api('/admin/releases')
           renderReleases(releases.versions || [])
 
           elStatus.textContent = 'OK'
@@ -107,11 +121,22 @@
 
       function renderReleases(versions) {
         elBody.innerHTML = ''
-        for (const v of versions) {
+        for (const r of versions) {
+          const v = r.version
           const tr = document.createElement('tr')
 
           const tdV = document.createElement('td')
-          tdV.innerHTML = `<span class="badge">${v}</span>`
+          tdV.innerHTML = `<span class="badge">${v}</span>${r.protected ? '<span class="pill danger">protected</span>' : ''}`
+
+          const tdSize = document.createElement('td')
+          tdSize.textContent = prettyBytes(r.sizeBytes)
+
+          const tdState = document.createElement('td')
+          if (r.protected) {
+            tdState.textContent = `受保护：${(r.protectedReasons || []).join(', ') || 'stable'}`
+          } else {
+            tdState.textContent = '可清理'
+          }
 
           const tdA = document.createElement('td')
           const btnPromote = document.createElement('button')
@@ -144,7 +169,36 @@
           tdA.appendChild(document.createTextNode(' '))
           tdA.appendChild(btnRollback)
 
+          const btnDelete = document.createElement('button')
+          btnDelete.textContent = '删除版本'
+          btnDelete.onclick = async () => {
+            const force = !!elForceDelete.checked
+            if (r.protected && !force) {
+              alert('该版本属于 stable 受保护集合；如需删除请勾选“强制删除”')
+              return
+            }
+
+            const tip = r.protected ? `（受保护：${(r.protectedReasons || []).join(', ') || 'stable'}）` : ''
+            const msg = r.protected
+              ? `确认强制删除版本 ${v}${tip}？\n\n注意：删除 releases 会导致无法回滚到该版本（但不影响当前 /updates/stable/ 静态文件）。`
+              : `确认删除版本 ${v}？（删除 releases 目录以释放磁盘空间）`
+            if (!confirm(msg)) return
+
+            try {
+              await api(`/admin/releases/${encodeURIComponent(v)}${force ? '?force=1' : ''}`, { method: 'DELETE' })
+              log(`Deleted release ${v}${force ? ' (force)' : ''}`)
+              await refresh()
+            } catch (e) {
+              log(`ERROR: ${e.message || e}`)
+            }
+          }
+
+          tdA.appendChild(document.createTextNode(' '))
+          tdA.appendChild(btnDelete)
+
           tr.appendChild(tdV)
+          tr.appendChild(tdSize)
+          tr.appendChild(tdState)
           tr.appendChild(tdA)
           elBody.appendChild(tr)
         }

@@ -19,6 +19,8 @@
 - **管理面板（静态页）**：`GET /admin/`
 - **管理 API（需 Bearer Token）**
   - `GET /api/admin/releases`：列出已上传的版本目录
+  - `GET /api/admin/releases/details`：列出版本详情（大小/文件数/保护状态）
+  - `DELETE /api/admin/releases/<version>?force=1`：删除指定版本的 `releases/<version>/`（默认保护 stable 相关版本；`force=1` 强制）
   - `GET /api/admin/channels`：查询 stable 状态
   - `POST /api/admin/channels/stable/promote`：发布 stable
   - `POST /api/admin/channels/stable/rollback`：回滚 stable
@@ -215,6 +217,42 @@ curl -X POST \
   -H "Content-Type: application/json" \
   -d "{\"version\":\"0.5.2\"}" \
   http://localhost:8600/api/admin/channels/stable/promote
+```
+
+---
+
+## 清理 releases（手动）
+
+用于释放磁盘空间：删除历史版本目录 `releases/<version>/`。
+
+重要说明：
+
+- 删除 `releases/<version>` **不会影响** 当前 `/updates/stable/` 的静态文件（stable 已通过硬链接/复制持有文件）。
+- 但会影响 **回滚能力**：被删除的版本无法再通过 promote/rollback 切回。
+- 默认情况下，服务会保护 stable 当前版本与回滚链中的版本；如确需删除，请在管理面板勾选“强制删除”或在 API 中带 `force=1`。
+
+### 管理面板
+
+打开 `http://<host>:8600/admin/`，刷新后在版本列表中点击“删除版本”。
+
+### API 示例
+
+查看版本详情（含大小与保护状态）：
+
+```bash
+curl -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" http://localhost:8600/api/admin/releases/details
+```
+
+删除某个版本（非受保护版本）：
+
+```bash
+curl -X DELETE -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" http://localhost:8600/api/admin/releases/0.5.0
+```
+
+强制删除（允许删除 stable 回滚链引用的版本）：
+
+```bash
+curl -X DELETE -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" "http://localhost:8600/api/admin/releases/0.4.9?force=1"
 ```
 
 ---

@@ -2,10 +2,19 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { resolveUpdateStoragePaths } from '../updates/update-paths'
-import type { StableChannelState } from './admin.types'
+import type { ReleaseDetail, StableChannelState } from './admin.types'
 
 function normalizeVersion(input: string): string {
   return input.trim().replace(/^v/i, '')
+}
+
+function validateVersionSafe(version: string): void {
+  if (!version) throw new BadRequestException('version is required')
+  if (version === '.' || version === '..') throw new BadRequestException('invalid version')
+  if (version.includes('\0')) throw new BadRequestException('invalid version')
+  if (version.includes('/') || version.includes('\\')) throw new BadRequestException('invalid version')
+  if (version.includes('..')) throw new BadRequestException('invalid version')
+  if (!/^[0-9a-zA-Z][0-9a-zA-Z.+_-]*$/.test(version)) throw new BadRequestException('invalid version')
 }
 
 function parseSemver(version: string): number[] {
@@ -38,6 +47,41 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function getDirectoryStats(
+  dir: string
+): Promise<{ sizeBytes: number; fileCount: number; lastModifiedAt?: Date }> {
+  let sizeBytes = 0
+  let fileCount = 0
+  let lastModifiedAt: Date | undefined
+
+  const entries = await fs.readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const p = join(dir, entry.name)
+
+    if (entry.isDirectory()) {
+      const sub = await getDirectoryStats(p)
+      sizeBytes += sub.sizeBytes
+      fileCount += sub.fileCount
+      if (sub.lastModifiedAt && (!lastModifiedAt || sub.lastModifiedAt > lastModifiedAt)) {
+        lastModifiedAt = sub.lastModifiedAt
+      }
+      continue
+    }
+
+    if (!entry.isFile()) continue
+
+    const stat = await fs.stat(p)
+    sizeBytes += stat.size
+    fileCount += 1
+    const m = stat.mtime
+    if (m && (!lastModifiedAt || m > lastModifiedAt)) {
+      lastModifiedAt = m
+    }
+  }
+
+  return { sizeBytes, fileCount, lastModifiedAt }
 }
 
 async function copyOrLinkDirectory(sourceDir: string, targetDir: string): Promise<void> {
@@ -127,6 +171,87 @@ export class AdminService {
     return { versions }
   }
 
+  async listReleaseDetails(): Promise<{ stable: StableChannelState; versions: ReleaseDetail[] }> {
+    const stable = await this.readStableState()
+
+    await fs.mkdir(this.paths.releasesDir, { recursive: true })
+    const entries = await fs.readdir(this.paths.releasesDir, { withFileTypes: true })
+
+    const versions = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort(compareSemverDesc)
+
+    const protectedSet = new Set<string>()
+    if (stable.currentVersion) protectedSet.add(normalizeVersion(stable.currentVersion))
+    for (const v of stable.previousVersions || []) {
+      const n = normalizeVersion(v)
+      if (n) protectedSet.add(n)
+    }
+
+    const details: ReleaseDetail[] = []
+    for (const v of versions) {
+      const normalized = normalizeVersion(v)
+      const dir = join(this.paths.releasesDir, v)
+      const stats = await getDirectoryStats(dir)
+
+      const protectedReasons: string[] = []
+      if (stable.currentVersion && normalizeVersion(stable.currentVersion) === normalized) {
+        protectedReasons.push('stable current')
+      }
+      if ((stable.previousVersions || []).some((pv) => normalizeVersion(pv) === normalized)) {
+        protectedReasons.push('stable rollback chain')
+      }
+
+      details.push({
+        version: v,
+        sizeBytes: stats.sizeBytes,
+        fileCount: stats.fileCount,
+        lastModifiedAt: stats.lastModifiedAt ? stats.lastModifiedAt.toISOString() : undefined,
+        protected: protectedSet.has(normalized),
+        protectedReasons
+      })
+    }
+
+    return { stable, versions: details }
+  }
+
+  async deleteRelease(versionInput: string, options?: { force?: boolean }): Promise<{ ok: true }> {
+    const version = normalizeVersion(versionInput)
+    validateVersionSafe(version)
+
+    const stable = await this.readStableState()
+    const normalizedCurrent = stable.currentVersion ? normalizeVersion(stable.currentVersion) : undefined
+    const normalizedPrevious = new Set((stable.previousVersions || []).map((v) => normalizeVersion(v)))
+
+    const protectedReasons: string[] = []
+    if (normalizedCurrent && normalizedCurrent === version) protectedReasons.push('stable current')
+    if (normalizedPrevious.has(version)) protectedReasons.push('stable rollback chain')
+
+    const force = options?.force === true
+    if (protectedReasons.length > 0 && !force) {
+      throw new BadRequestException(`release is protected: ${protectedReasons.join(', ')}`)
+    }
+
+    const dir = join(this.paths.releasesDir, version)
+    if (!(await pathExists(dir))) {
+      throw new NotFoundException(`release not found: ${version}`)
+    }
+
+    await fs.rm(dir, { recursive: true, force: true })
+
+    if (force && normalizedPrevious.has(version)) {
+      const nextState: StableChannelState = {
+        ...stable,
+        previousVersions: (stable.previousVersions || []).filter((v) => normalizeVersion(v) !== version),
+        updatedAt: new Date().toISOString()
+      }
+      await this.writeStableState(nextState)
+    }
+
+    return { ok: true }
+  }
+
   async getChannels(): Promise<{ stable: StableChannelState }> {
     const stable = await this.readStableState()
     return { stable }
@@ -134,7 +259,7 @@ export class AdminService {
 
   async promoteStable(versionInput: string): Promise<{ stable: StableChannelState }> {
     const version = normalizeVersion(versionInput)
-    if (!version) throw new BadRequestException('version is required')
+    validateVersionSafe(version)
 
     const releaseDir = join(this.paths.releasesDir, version)
     if (!(await pathExists(releaseDir))) {
