@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config'
 import { ServeStaticModule } from '@nestjs/serve-static'
 import { basename, join } from 'path'
 import { AdminModule } from './admin/admin.module'
+import { DownloadsModule } from './downloads/downloads.module'
 import { resolveUpdateStoragePaths } from './updates/update-paths'
 import { HealthController } from './health.controller'
 
@@ -18,6 +19,16 @@ const { channelsDir } = resolveUpdateStoragePaths()
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'public', 'admin'),
       serveRoot: '/admin',
+      serveStaticOptions: {
+        index: ['index.html'],
+        dotfiles: 'ignore'
+      }
+    }),
+
+    // 网页下载页（给人工分发/手动安装使用）
+    ServeStaticModule.forRoot({
+      rootPath: join(process.cwd(), 'public', 'download'),
+      serveRoot: '/download',
       serveStaticOptions: {
         index: ['index.html'],
         dotfiles: 'ignore'
@@ -42,7 +53,8 @@ const { channelsDir } = resolveUpdateStoragePaths()
       }
     }),
 
-    AdminModule
+    AdminModule,
+    DownloadsModule
   ],
   controllers: [HealthController]
 })

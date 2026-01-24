@@ -24,6 +24,7 @@ async function bootstrap() {
 
   Logger.log(`UpdateCenter is running on http://0.0.0.0:${port}`, 'Bootstrap')
   Logger.log(`Admin UI: http://0.0.0.0:${port}/admin/`, 'Bootstrap')
+  Logger.log(`Download page: http://0.0.0.0:${port}/download/`, 'Bootstrap')
   Logger.log(`Updates base: http://0.0.0.0:${port}/updates/stable/`, 'Bootstrap')
 }
 

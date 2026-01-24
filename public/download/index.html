@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UName ERP 下载</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 24px; max-width: 920px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .card { border: 1px solid rgba(127,127,127,0.35); border-radius: 12px; padding: 16px; margin-top: 16px; }
+      .muted { opacity: 0.75; }
+      .btn { display: inline-block; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.35); text-decoration: none; }
+      .btn:hover { background: rgba(127,127,127,0.12); }
+      code { background: rgba(127,127,127,0.12); padding: 2px 6px; border-radius: 6px; }
+      pre { background: rgba(127,127,127,0.12); padding: 12px; overflow: auto; border-radius: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border-bottom: 1px solid rgba(127,127,127,0.25); padding: 10px 6px; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <h2>UName ERP 下载</h2>
+    <p class="muted">用于手动安装/对外分发。桌面端自动更新请继续使用应用内更新。</p>
+
+    <div class="card">
+      <div class="row">
+        <a class="btn" href="/api/downloads/stable/latest/auto">自动识别下载</a>
+        <a class="btn" href="/api/downloads/stable/latest/win">Windows 下载</a>
+        <a class="btn" href="/api/downloads/stable/latest/mac">macOS 下载</a>
+        <a class="btn" href="/api/downloads/stable/latest/linux">Linux 下载</a>
+        <a class="btn" href="/updates/stable/">查看更新目录</a>
+      </div>
+      <p class="muted" style="margin-top: 12px">
+        固定直链示例：<code>/api/downloads/stable/latest/win</code>（始终指向最新 stable 安装包）
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <strong>当前 stable</strong>
+        <span id="stableMeta" class="muted">加载中...</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 120px">平台</th>
+            <th>版本/文件</th>
+            <th style="width: 140px">大小</th>
+            <th style="width: 140px">状态</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <pre id="err" style="display: none"></pre>
+    </div>
+
+    <script>
+      const elMeta = document.getElementById('stableMeta')
+      const elTbody = document.getElementById('tbody')
+      const elErr = document.getElementById('err')
+
+      function prettyBytes(bytes) {
+        const n = Number(bytes)
+        if (!Number.isFinite(n) || n <= 0) return '-'
+        const units = ['B', 'KB', 'MB', 'GB', 'TB']
+        let i = 0
+        let v = n
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1 }
+        return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+      }
+
+      function renderPlatform(info) {
+        const tr = document.createElement('tr')
+        const tdP = document.createElement('td')
+        tdP.textContent = info.platform
+
+        const tdV = document.createElement('td')
+        const file = info.file ? ` / ${info.file}` : ''
+        tdV.textContent = `${info.version || '-'}${file}`
+
+        const tdS = document.createElement('td')
+        tdS.textContent = info.size ? prettyBytes(info.size) : '-'
+
+        const tdSt = document.createElement('td')
+        tdSt.textContent = info.available ? '可下载' : (info.error || '不可用')
+
+        tr.appendChild(tdP)
+        tr.appendChild(tdV)
+        tr.appendChild(tdS)
+        tr.appendChild(tdSt)
+        return tr
+      }
+
+      async function init() {
+        try {
+          const res = await fetch('/api/downloads/stable/latest', { headers: { 'Accept': 'application/json' } })
+          const data = await res.json()
+          const stable = data && data.stableState ? data.stableState : null
+          const meta = stable && (stable.currentVersion || stable.updatedAt)
+            ? `版本：${stable.currentVersion || '-'}；更新时间：${stable.updatedAt || '-'}`
+            : '（未记录 stable 状态，以 latest*.yml 为准）'
+          elMeta.textContent = meta
+
+          elTbody.innerHTML = ''
+          const p = data && data.platforms ? data.platforms : {}
+          ;['win', 'mac', 'linux'].forEach((k) => {
+            if (!p[k]) return
+            elTbody.appendChild(renderPlatform(p[k]))
+          })
+        } catch (e) {
+          elMeta.textContent = '加载失败'
+          elErr.style.display = 'block'
+          elErr.textContent = String((e && e.message) || e)
+        }
+      }
+
+      init()
+    </script>
+  </body>
+</html>
+
