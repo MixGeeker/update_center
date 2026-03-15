@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config'
 import { ServeStaticModule } from '@nestjs/serve-static'
 import { basename, join } from 'path'
 import { AdminModule } from './admin/admin.module'
+import { BackendReleasesModule } from './backend-releases/backend-releases.module'
 import { DownloadsModule } from './downloads/downloads.module'
 import { resolveUpdateStoragePaths } from './updates/update-paths'
 import { HealthController } from './health.controller'
@@ -54,6 +55,7 @@ const { channelsDir } = resolveUpdateStoragePaths()
     }),
 
     AdminModule,
+    BackendReleasesModule,
     DownloadsModule
   ],
   controllers: [HealthController]

@@ -1,162 +1,39 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import {
+  compareSemverDesc,
+  copyOrLinkBlockmaps,
+  copyOrLinkDirectory,
+  getDirectoryStats,
+  normalizeVersion,
+  pathExists,
+  readJsonFile,
+  validateVersionSafe,
+  writeJsonFile
+} from '../common/release-storage.utils'
 import { resolveUpdateStoragePaths } from '../updates/update-paths'
 import type { ReleaseDetail, StableChannelState } from './admin.types'
-
-function normalizeVersion(input: string): string {
-  return input.trim().replace(/^v/i, '')
-}
-
-function validateVersionSafe(version: string): void {
-  if (!version) throw new BadRequestException('version is required')
-  if (version === '.' || version === '..') throw new BadRequestException('invalid version')
-  if (version.includes('\0')) throw new BadRequestException('invalid version')
-  if (version.includes('/') || version.includes('\\')) throw new BadRequestException('invalid version')
-  if (version.includes('..')) throw new BadRequestException('invalid version')
-  if (!/^[0-9a-zA-Z][0-9a-zA-Z.+_-]*$/.test(version)) throw new BadRequestException('invalid version')
-}
-
-function parseSemver(version: string): number[] {
-  const v = normalizeVersion(version)
-  const parts = v.split('.')
-  return parts.map((p) => {
-    const n = Number(p)
-    return Number.isFinite(n) ? n : 0
-  })
-}
-
-function compareSemverDesc(a: string, b: string): number {
-  const ap = parseSemver(a)
-  const bp = parseSemver(b)
-  const maxLen = Math.max(ap.length, bp.length)
-
-  for (let i = 0; i < maxLen; i += 1) {
-    const av = ap[i] ?? 0
-    const bv = bp[i] ?? 0
-    if (av !== bv) return bv - av
-  }
-
-  return b.localeCompare(a)
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await fs.access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function getDirectoryStats(
-  dir: string
-): Promise<{ sizeBytes: number; fileCount: number; lastModifiedAt?: Date }> {
-  let sizeBytes = 0
-  let fileCount = 0
-  let lastModifiedAt: Date | undefined
-
-  const entries = await fs.readdir(dir, { withFileTypes: true })
-  for (const entry of entries) {
-    const p = join(dir, entry.name)
-
-    if (entry.isDirectory()) {
-      const sub = await getDirectoryStats(p)
-      sizeBytes += sub.sizeBytes
-      fileCount += sub.fileCount
-      if (sub.lastModifiedAt && (!lastModifiedAt || sub.lastModifiedAt > lastModifiedAt)) {
-        lastModifiedAt = sub.lastModifiedAt
-      }
-      continue
-    }
-
-    if (!entry.isFile()) continue
-
-    const stat = await fs.stat(p)
-    sizeBytes += stat.size
-    fileCount += 1
-    const m = stat.mtime
-    if (m && (!lastModifiedAt || m > lastModifiedAt)) {
-      lastModifiedAt = m
-    }
-  }
-
-  return { sizeBytes, fileCount, lastModifiedAt }
-}
-
-async function copyOrLinkDirectory(sourceDir: string, targetDir: string): Promise<void> {
-  await fs.mkdir(targetDir, { recursive: true })
-
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true })
-  for (const entry of entries) {
-    const src = join(sourceDir, entry.name)
-    const dst = join(targetDir, entry.name)
-
-    if (entry.isDirectory()) {
-      await copyOrLinkDirectory(src, dst)
-      continue
-    }
-
-    if (!entry.isFile()) {
-      // 只同步文件/目录，忽略符号链接等特殊类型（electron-builder 产物一般不会用到）
-      continue
-    }
-
-    try {
-      await fs.link(src, dst)
-    } catch {
-      await fs.copyFile(src, dst)
-    }
-  }
-}
-
-async function copyOrLinkBlockmaps(sourceDir: string, targetDir: string): Promise<void> {
-  await fs.mkdir(targetDir, { recursive: true })
-
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true })
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-
-    const name = entry.name.toLowerCase()
-    if (!name.endsWith('.blockmap')) continue
-
-    const src = join(sourceDir, entry.name)
-    const dst = join(targetDir, entry.name)
-
-    try {
-      await fs.link(src, dst)
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException | undefined)?.code
-      if (code === 'EEXIST') continue
-
-      await fs.copyFile(src, dst)
-    }
-  }
-}
 
 @Injectable()
 export class AdminService {
   private readonly paths = resolveUpdateStoragePaths()
 
   private async readStableState(): Promise<StableChannelState> {
-    try {
-      const raw = await fs.readFile(this.paths.stableStateFile, 'utf-8')
-      const parsed = JSON.parse(raw) as Partial<StableChannelState>
-      return {
-        currentVersion: parsed.currentVersion,
-        previousVersions: Array.isArray(parsed.previousVersions) ? parsed.previousVersions : [],
-        updatedAt: parsed.updatedAt
-      }
-    } catch {
-      return {
-        previousVersions: []
-      }
+    const parsed = await readJsonFile<Partial<StableChannelState>>(this.paths.stableStateFile)
+    if (!parsed) {
+      return { previousVersions: [] }
+    }
+
+    return {
+      currentVersion: parsed.currentVersion,
+      previousVersions: Array.isArray(parsed.previousVersions) ? parsed.previousVersions : [],
+      updatedAt: parsed.updatedAt
     }
   }
 
   private async writeStableState(state: StableChannelState): Promise<void> {
-    await fs.mkdir(this.paths.channelsDir, { recursive: true })
-    await fs.writeFile(this.paths.stableStateFile, JSON.stringify(state, null, 2), 'utf-8')
+    await writeJsonFile(this.paths.stableStateFile, state)
   }
 
   async listReleases(): Promise<{ versions: string[] }> {

@@ -1,12 +1,14 @@
-# UName ERP Update Center（桌面端更新中心）
+# UName ERP Update Center（统一发布中心）
 
 本目录是 UName ERP 桌面端的更新中心服务，技术栈为 **Node.js + NestJS**。
 
-它的职责是：
+它现在的职责是：
 
 - 对外提供 **静态更新资源**（供 `electron-updater` / Generic Provider 拉取）：`/updates/<channel>/...`
 - 提供 **管理面板**（发布 stable、回滚）：`/admin/`（需要 Token）
 - 提供 **网页下载页与“最新直链”**（给用户手动下载安装）：`/download/`、`/api/downloads/...`
+- 提供 **后端发布管理 API**：backend release 上传、testing/stable 双渠道流转、桌面端兼容策略映射
+- 提供 **后端部署任务队列**：创建部署任务记录，作为后续宿主执行器（deploy-agent）的控制面
 - 提供 **健康检查**：`/api/health`（Docker healthcheck 会用到）
 
 > 注意：仓库根目录不是单一 Git 仓库；`update_center/` 是一个独立模块（内有自己的 `.git/`）。请在 `update_center/` 目录执行安装/构建/运行命令。
@@ -24,6 +26,22 @@
   - `GET /api/admin/channels`：查询 stable 状态
   - `POST /api/admin/channels/stable/promote`：发布 stable
   - `POST /api/admin/channels/stable/rollback`：回滚 stable
+  - `POST /api/admin/backend-releases/upload-sessions`：创建后端 release 上传会话
+  - `POST /api/admin/backend-releases/upload-sessions/<sessionId>/files/{image|checksums}?fileName=...`：上传后端 tar / checksum 文件（原始二进制流）
+  - `POST /api/admin/backend-releases/upload-sessions/<sessionId>/finalize`：写入 manifest，可选直接推入 `testing` 或 `stable`
+  - `GET /api/admin/backend-releases`：列出后端版本
+  - `GET /api/admin/backend-releases/details`：列出后端版本详情
+  - `GET /api/admin/backend-releases/<version>`：查询单个后端版本
+  - `DELETE /api/admin/backend-releases/<version>?force=1`：删除后端版本（不会删除当前 active 版本）
+  - `GET /api/admin/backend-channels`：查询后端 `testing/stable` 渠道状态
+  - `POST /api/admin/backend-channels/<testing|stable>/promote`：将后端版本推入目标渠道
+  - `POST /api/admin/backend-channels/<testing|stable>/rollback`：按回滚链回退
+  - `PUT /api/admin/backend-compatibility/<backendVersion>`：写入桌面端兼容策略
+  - `GET /api/admin/backend-compatibility/<backendVersion>`：查询指定后端版本的兼容策略
+  - `GET /api/admin/backend-compatibility/active`：查询当前 stable 后端版本对应的兼容策略
+  - `POST /api/admin/backend-deployments`：创建后端部署任务
+  - `GET /api/admin/backend-deployments`：查询后端部署任务列表
+  - `GET /api/admin/backend-deployments/<deploymentId>`：查询单个部署任务
 - **更新资源（静态目录）**：`GET /updates/<channel>/...`
   - 典型：`/updates/stable/latest.yml`、`/updates/stable/<installer>`
 - **网页下载（给浏览器用户）**
@@ -51,9 +69,32 @@
       latest.yml
       ...
     .stable-state.json         # stable 发布状态（点文件，不对外暴露）
+  backend/
+    releases/
+      <version>/
+        release-manifest.json
+        uname-erp-server-<version>-arm64.tar
+        checksums.txt
+    channels/
+      testing/
+      stable/
+      .testing-state.json
+      .stable-state.json
+    runtime/
+      compatibility/
+        <version>.json
+      deployments/
+        <deploymentId>.json
+      environments/
+        mac-prod.json
+      upload-sessions/
+        <sessionId>.json
+        <sessionId>/
 ```
 
 发布 stable 时，服务会将 `releases/<version>/` 的内容“硬链接/复制”到 `channels/stable/`，并维护 `.stable-state.json` 以支持回滚与保留历史 `*.blockmap`（便于差分下载）。
+
+后端 release 采用独立目录树：桌面端能力继续保持原有结构，后端能力统一落到 `backend/**`，互不影响。
 
 ---
 
@@ -167,9 +208,9 @@ npm run start:prod
 
 ---
 
-## 上传版本产物（releases/<version>）
+## 上传桌面端版本产物（releases/<version>）
 
-更新中心不会通过 HTTP 接收大文件上传；通常由 CI/运维通过 `rsync/scp` 将构建产物放入数据目录的 `releases/<version>/`。
+桌面端更新中心继续支持原有“直接落目录”的方式：通常由 CI/运维通过 `rsync/scp` 将构建产物放入数据目录的 `releases/<version>/`。
 
 要求：
 
@@ -193,6 +234,128 @@ rsync -av ./dist/ user@server:/data/update_center/updates/releases/0.5.2/
 ```
 
 上传完成后，再通过管理面板/API 将该版本发布到 stable。
+
+---
+
+## 后端版本上传与渠道管理
+
+后端 release 使用 **HTTP upload session**，不再要求 CI 直接操作宿主机目录。
+
+### 1) 后端 release 目录内容
+
+每个后端版本目录至少包含：
+
+```text
+backend/releases/<version>/
+  release-manifest.json
+  uname-erp-server-<version>-arm64.tar
+  checksums.txt
+```
+
+其中：
+
+- `release-manifest.json`：描述镜像 tar 文件名、tag、构建提交、迁移策略、compose profiles 等
+- `*.tar`：`docker save` 导出的 `linux/arm64` 镜像包
+- `checksums.txt`：校验文件；若 CI 未上传，服务会在 finalize 时自动生成
+
+### 2) 创建 upload session
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"version\":\"1.2.3\"}" \
+  http://localhost:8600/api/admin/backend-releases/upload-sessions
+```
+
+### 3) 上传镜像 tar
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@./uname-erp-server-1.2.3-arm64.tar" \
+  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/image?fileName=uname-erp-server-1.2.3-arm64.tar"
+```
+
+可选：上传 `checksums.txt`
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@./checksums.txt" \
+  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/checksums?fileName=checksums.txt"
+```
+
+### 4) finalize 并可选推进 testing/stable
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d @./release-manifest.json \
+  http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/finalize
+```
+
+你可以在 finalize body 中附带：
+
+- `channel: "testing"`：上传完成后直接推入 testing
+- `desktopCompatibility`：同时写入桌面端兼容策略
+
+注意：
+
+- 直接推入 `stable` 时，必须同时具备有效的 `desktopCompatibility`
+- `desktopCompatibility.desktopRecommendedVersion` 必须在 update_center 内能解析到桌面端版本
+
+### 5) 双渠道
+
+后端双渠道采用“发布渠道”语义：
+
+- `testing`：验证通道
+- `stable`：生产通道
+
+接口：
+
+- `GET /api/admin/backend-channels`
+- `POST /api/admin/backend-channels/testing/promote`
+- `POST /api/admin/backend-channels/testing/rollback`
+- `POST /api/admin/backend-channels/stable/promote`
+- `POST /api/admin/backend-channels/stable/rollback`
+
+### 6) 兼容策略
+
+后端版本可绑定桌面端兼容策略，字段包括：
+
+- `desktopMinVersion`
+- `desktopRecommendedVersion`
+- `desktopMaxVersion`（可选）
+- `enforceMode`：`none | warn | hard_block`
+- `notes`（可选）
+
+示例：
+
+```bash
+curl -X PUT \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"desktopMinVersion\":\"0.8.0\",\"desktopRecommendedVersion\":\"0.8.4\",\"enforceMode\":\"warn\"}" \
+  http://localhost:8600/api/admin/backend-compatibility/1.2.3
+```
+
+### 7) 部署任务队列
+
+当前版本的 `update_center` 已支持创建后端部署任务记录，供后续宿主执行器消费：
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"channel\":\"stable\",\"environmentId\":\"mac-prod\"}" \
+  http://localhost:8600/api/admin/backend-deployments
+```
+
+这一步会生成 `backend/runtime/deployments/<deploymentId>.json`。当前它是发布控制面的任务落盘能力，后续可由 `deploy-agent` 认领执行。
 
 ---
 
