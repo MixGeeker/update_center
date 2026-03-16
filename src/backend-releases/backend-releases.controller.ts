@@ -17,6 +17,13 @@ type CreateUploadSessionBody = {
   version?: string
 }
 
+type UploadSessionFileQuery = {
+  fileName?: string
+  chunkIndex?: string
+  totalChunks?: string
+  totalSizeBytes?: string
+}
+
 type PromoteBody = {
   version?: string
 }
@@ -39,10 +46,14 @@ export class BackendReleasesController {
   uploadSessionFile(
     @Param('sessionId') sessionId: string,
     @Param('slot') slot: string,
-    @Query('fileName') fileName: string,
+    @Query() query: UploadSessionFileQuery,
     @Req() req: NodeJS.ReadableStream
   ) {
-    return this.backendReleasesService.uploadSessionFile(sessionId, slot, fileName, req)
+    return this.backendReleasesService.uploadSessionFile(sessionId, slot, query.fileName ?? '', req, {
+      chunkIndex: query.chunkIndex,
+      totalChunks: query.totalChunks,
+      totalSizeBytes: query.totalSizeBytes
+    })
   }
 
   @Post('backend-releases/upload-sessions/:sessionId/finalize')

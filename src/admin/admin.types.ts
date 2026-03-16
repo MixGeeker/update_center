@@ -25,3 +25,33 @@ export interface ListReleaseDetailsResponse {
 export interface GetChannelsResponse {
   stable: StableChannelState
 }
+
+export interface DesktopUploadedFile {
+  fileName: string
+  storedFileName: string
+  sizeBytes: number
+  sha256: string
+  uploadedAt: string
+  uploadMode?: 'single' | 'chunked'
+  chunkCount?: number
+}
+
+export interface DesktopUploadChunkState {
+  fileName: string
+  storedFileName: string
+  tempStoredFileName: string
+  totalChunks: number
+  nextChunkIndex: number
+  receivedBytes: number
+  totalSizeBytes?: number
+  updatedAt: string
+}
+
+export interface DesktopUploadSessionRecord {
+  schemaVersion: 1
+  sessionId: string
+  version: string
+  createdAt: string
+  files: Record<string, DesktopUploadedFile>
+  chunkUploads?: Record<string, DesktopUploadChunkState>
+}

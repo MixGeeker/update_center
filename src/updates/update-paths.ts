@@ -5,6 +5,8 @@ export interface UpdateStoragePaths {
   updateDataDir: string
   desktopReleasesDir: string
   desktopChannelsDir: string
+  desktopRuntimeDir: string
+  desktopUploadSessionsDir: string
   releasesDir: string
   channelsDir: string
   stableDir: string
@@ -36,6 +38,8 @@ export function resolveUpdateStoragePaths(): UpdateStoragePaths {
 
   const desktopReleasesDir = join(updateDataDir, 'releases')
   const desktopChannelsDir = join(updateDataDir, 'channels')
+  const desktopRuntimeDir = join(updateDataDir, 'runtime')
+  const desktopUploadSessionsDir = join(desktopRuntimeDir, 'upload-sessions')
   const stableDir = join(desktopChannelsDir, 'stable')
 
   // 点文件默认不会被 express.static 暴露（dotfiles: 'ignore'）
@@ -59,6 +63,8 @@ export function resolveUpdateStoragePaths(): UpdateStoragePaths {
     updateDataDir,
     desktopReleasesDir,
     desktopChannelsDir,
+    desktopRuntimeDir,
+    desktopUploadSessionsDir,
     releasesDir: desktopReleasesDir,
     channelsDir: desktopChannelsDir,
     stableDir,

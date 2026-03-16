@@ -9,6 +9,8 @@ export async function ensureUpdateStorage(): Promise<void> {
   await fs.mkdir(paths.releasesDir, { recursive: true })
   await fs.mkdir(paths.channelsDir, { recursive: true })
   await fs.mkdir(paths.stableDir, { recursive: true })
+  await fs.mkdir(paths.desktopRuntimeDir, { recursive: true })
+  await fs.mkdir(paths.desktopUploadSessionsDir, { recursive: true })
 
   await fs.mkdir(paths.backendRootDir, { recursive: true })
   await fs.mkdir(paths.backendReleasesDir, { recursive: true })

@@ -26,6 +26,9 @@
   - `GET /api/admin/channels`：查询 stable 状态
   - `POST /api/admin/channels/stable/promote`：发布 stable
   - `POST /api/admin/channels/stable/rollback`：回滚 stable
+  - `POST /api/admin/releases/upload-sessions`：创建桌面端 release 上传会话
+  - `POST /api/admin/releases/upload-sessions/<sessionId>/files?fileName=...`：上传桌面端产物，支持分片
+  - `POST /api/admin/releases/upload-sessions/<sessionId>/finalize`：将会话内文件合并写入 `releases/<version>/`
   - `POST /api/admin/backend-releases/upload-sessions`：创建后端 release 上传会话
   - `POST /api/admin/backend-releases/upload-sessions/<sessionId>/files/{image|checksums}?fileName=...`：上传后端 tar / checksum 文件（原始二进制流）
   - `POST /api/admin/backend-releases/upload-sessions/<sessionId>/finalize`：写入 manifest，可选直接推入 `testing` 或 `stable`
@@ -69,6 +72,10 @@
       latest.yml
       ...
     .stable-state.json         # stable 发布状态（点文件，不对外暴露）
+  runtime/
+    upload-sessions/
+      <sessionId>.json
+      <sessionId>/
   backend/
     releases/
       <version>/
@@ -94,7 +101,7 @@
 
 发布 stable 时，服务会将 `releases/<version>/` 的内容“硬链接/复制”到 `channels/stable/`，并维护 `.stable-state.json` 以支持回滚与保留历史 `*.blockmap`（便于差分下载）。
 
-后端 release 采用独立目录树：桌面端能力继续保持原有结构，后端能力统一落到 `backend/**`，互不影响。
+桌面端与后端现在都支持 upload session，但目录树仍然分离：桌面端保持原有 `releases/` / `channels/` 结构，后端能力统一落到 `backend/**`，互不影响。
 
 ---
 
@@ -210,7 +217,10 @@ npm run start:prod
 
 ## 上传桌面端版本产物（releases/<version>）
 
-桌面端更新中心继续支持原有“直接落目录”的方式：通常由 CI/运维通过 `rsync/scp` 将构建产物放入数据目录的 `releases/<version>/`。
+桌面端更新中心现在支持两种方式：
+
+- 推荐：通过 **HTTP upload session** 上传桌面端产物，适合 GitHub Actions、自建 runner、Cloudflare 反代环境
+- 兼容：继续允许运维通过 `rsync/scp` 直接把构建产物放入数据目录的 `releases/<version>/`
 
 要求：
 
@@ -227,7 +237,58 @@ npm run start:prod
   UName ERP Setup 0.5.2.exe.blockmap
 ```
 
-上传命令示例（仅示例，按你的实际路径与服务器账号调整）：
+### 1) 创建 upload session
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"version\":\"0.5.2\"}" \
+  http://localhost:8600/api/admin/releases/upload-sessions
+```
+
+### 2) 上传桌面端文件
+
+单请求上传示例：
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@./dist/latest.yml" \
+  "http://localhost:8600/api/admin/releases/upload-sessions/<sessionId>/files?fileName=latest.yml"
+```
+
+分片上传示例：
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@./chunk-000.bin" \
+  "http://localhost:8600/api/admin/releases/upload-sessions/<sessionId>/files?fileName=UName%20ERP%20Setup%200.5.2.exe&chunkIndex=0&totalChunks=4&totalSizeBytes=734003200"
+```
+
+说明：
+
+- 同一个 session 内可以上传多个文件
+- 同一个版本可以由多个 session 分别上传不同平台产物，finalize 时会合并进入同一个 `releases/<version>/`
+- chunk 必须按顺序上传，从 `chunkIndex=0` 开始
+- 最后一片上传完成后，该文件才会被标记为上传完成
+
+### 3) finalize 写入 releases/<version>
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{}" \
+  http://localhost:8600/api/admin/releases/upload-sessions/<sessionId>/finalize
+```
+
+### 4) 兼容的直写目录方式
+
+如果你仍然使用 `rsync/scp`，也可以直接把产物放到版本目录：
 
 ```bash
 rsync -av ./dist/ user@server:/data/update_center/updates/releases/0.5.2/
@@ -270,6 +331,11 @@ curl -X POST \
 
 ### 3) 上传镜像 tar
 
+支持两种模式：
+
+- 小文件可直接单请求上传
+- 大文件建议使用分片上传，适合经过 Cloudflare 等网关时规避 `413 Payload Too Large`
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
@@ -287,6 +353,22 @@ curl -X POST \
   --data-binary "@./checksums.txt" \
   "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/checksums?fileName=checksums.txt"
 ```
+
+分片上传示例（把大 tar 切成多个顺序 chunk）：
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary "@./chunk-000.bin" \
+  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/image?fileName=uname-erp-server-1.2.3-arm64.tar&chunkIndex=0&totalChunks=4&totalSizeBytes=734003200"
+```
+
+说明：
+
+- chunk 必须按顺序上传，从 `chunkIndex=0` 开始
+- `totalChunks` / `totalSizeBytes` 在同一个文件上传过程中必须保持一致
+- 最后一个 chunk 完成后，服务端才会把该文件标记为已上传完成
 
 ### 4) finalize 并可选推进 testing/stable
 

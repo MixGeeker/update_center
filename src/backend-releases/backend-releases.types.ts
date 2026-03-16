@@ -19,6 +19,20 @@ export interface BackendUploadedFile {
   sizeBytes: number
   sha256: string
   uploadedAt: string
+  uploadMode?: 'single' | 'chunked'
+  chunkCount?: number
+}
+
+export interface BackendUploadChunkState {
+  slot: BackendUploadSlot
+  fileName: string
+  storedFileName: string
+  tempStoredFileName: string
+  totalChunks: number
+  nextChunkIndex: number
+  receivedBytes: number
+  totalSizeBytes?: number
+  updatedAt: string
 }
 
 export interface BackendUploadSessionRecord {
@@ -27,6 +41,7 @@ export interface BackendUploadSessionRecord {
   version: string
   createdAt: string
   files: Partial<Record<BackendUploadSlot, BackendUploadedFile>>
+  chunkUploads?: Partial<Record<BackendUploadSlot, BackendUploadChunkState>>
 }
 
 export interface BackendCompatibilityPolicy {

@@ -5,7 +5,7 @@ import {
   NotFoundException
 } from '@nestjs/common'
 import { createHash, randomUUID } from 'crypto'
-import { createWriteStream, promises as fs } from 'fs'
+import { createReadStream, createWriteStream, promises as fs } from 'fs'
 import { basename, join } from 'path'
 import { pipeline } from 'stream/promises'
 import {
@@ -54,6 +54,21 @@ type CreateDeploymentBody = {
   notes?: unknown
 }
 
+type UploadSessionFileOptions = {
+  chunkIndex?: unknown
+  totalChunks?: unknown
+  totalSizeBytes?: unknown
+}
+
+type NormalizedChunkUploadOptions =
+  | { enabled: false }
+  | {
+      enabled: true
+      chunkIndex: number
+      totalChunks: number
+      totalSizeBytes?: number
+    }
+
 @Injectable()
 export class BackendReleasesService {
   private readonly paths = resolveUpdateStoragePaths()
@@ -99,6 +114,33 @@ export class BackendReleasesService {
     sessionId: string,
     slotInput: string,
     fileNameInput: string,
+    stream: NodeJS.ReadableStream,
+    options?: UploadSessionFileOptions
+  ): Promise<{
+    sessionId: string
+    slot: BackendUploadSlot
+    fileName: string
+    sizeBytes: number
+    sha256?: string
+    completed: boolean
+    chunkIndex?: number
+    totalChunks?: number
+  }> {
+    const slot = this.normalizeUploadSlot(slotInput)
+    const fileName = sanitizeFileName(fileNameInput)
+    const normalizedOptions = this.normalizeChunkUploadOptions(options)
+
+    if (normalizedOptions.enabled) {
+      return this.uploadSessionFileChunked(sessionId, slot, fileName, stream, normalizedOptions)
+    }
+
+    return this.uploadSessionFileSingle(sessionId, slot, fileName, stream)
+  }
+
+  private async uploadSessionFileSingle(
+    sessionId: string,
+    slot: BackendUploadSlot,
+    fileName: string,
     stream: NodeJS.ReadableStream
   ): Promise<{
     sessionId: string
@@ -106,16 +148,15 @@ export class BackendReleasesService {
     fileName: string
     sizeBytes: number
     sha256: string
+    completed: true
   }> {
-    const slot = this.normalizeUploadSlot(slotInput)
-    const fileName = sanitizeFileName(fileNameInput)
     const session = await this.readSession(sessionId)
     const sessionDir = this.getSessionDir(sessionId)
     const storedFileName = `${slot}__${fileName}`
     const targetPath = join(sessionDir, storedFileName)
 
     await fs.mkdir(sessionDir, { recursive: true })
-    await fs.rm(targetPath, { force: true })
+    await this.cleanupSessionSlotArtifacts(sessionDir, session, slot, storedFileName)
 
     const hasher = createHash('sha256')
     let sizeBytes = 0
@@ -141,7 +182,8 @@ export class BackendReleasesService {
       files: {
         ...session.files,
         [slot]: uploaded
-      }
+      },
+      chunkUploads: this.removeChunkUploadState(session.chunkUploads, slot)
     }
 
     await this.writeSession(nextSession)
@@ -151,7 +193,153 @@ export class BackendReleasesService {
       slot,
       fileName,
       sizeBytes,
-      sha256: uploaded.sha256
+      sha256: uploaded.sha256,
+      completed: true
+    }
+  }
+
+  private async uploadSessionFileChunked(
+    sessionId: string,
+    slot: BackendUploadSlot,
+    fileName: string,
+    stream: NodeJS.ReadableStream,
+    options: Extract<NormalizedChunkUploadOptions, { enabled: true }>
+  ): Promise<{
+    sessionId: string
+    slot: BackendUploadSlot
+    fileName: string
+    sizeBytes: number
+    sha256?: string
+    completed: boolean
+    chunkIndex: number
+    totalChunks: number
+  }> {
+    const session = await this.readSession(sessionId)
+    const sessionDir = this.getSessionDir(sessionId)
+    const storedFileName = `${slot}__${fileName}`
+    const tempStoredFileName = `${storedFileName}.part`
+    const targetPath = join(sessionDir, storedFileName)
+    const tempPath = join(sessionDir, tempStoredFileName)
+    const existingProgress = session.chunkUploads?.[slot]
+
+    await fs.mkdir(sessionDir, { recursive: true })
+
+    if (options.chunkIndex === 0) {
+      await this.cleanupSessionSlotArtifacts(sessionDir, session, slot, storedFileName)
+    } else {
+      if (!existingProgress) {
+        throw new BadRequestException(`missing chunk upload progress for slot ${slot}; restart from chunk 0`)
+      }
+
+      if (
+        existingProgress.fileName !== fileName ||
+        existingProgress.storedFileName !== storedFileName ||
+        existingProgress.totalChunks !== options.totalChunks
+      ) {
+        throw new BadRequestException('chunk upload metadata mismatch; restart from chunk 0')
+      }
+
+      if (existingProgress.nextChunkIndex !== options.chunkIndex) {
+        throw new BadRequestException(
+          `unexpected chunk index ${options.chunkIndex}; expected ${existingProgress.nextChunkIndex}`
+        )
+      }
+
+      if (
+        typeof existingProgress.totalSizeBytes === 'number' &&
+        typeof options.totalSizeBytes === 'number' &&
+        existingProgress.totalSizeBytes !== options.totalSizeBytes
+      ) {
+        throw new BadRequestException('chunk upload size mismatch; restart from chunk 0')
+      }
+    }
+
+    const receivedBytesBefore = options.chunkIndex === 0 ? 0 : (existingProgress?.receivedBytes ?? 0)
+    let chunkSizeBytes = 0
+    stream.on('data', (chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      chunkSizeBytes += buffer.length
+    })
+
+    await pipeline(stream, createWriteStream(tempPath, { flags: 'a' }))
+
+    const receivedBytes = receivedBytesBefore + chunkSizeBytes
+    if (typeof options.totalSizeBytes === 'number' && receivedBytes > options.totalSizeBytes) {
+      throw new BadRequestException('received chunk bytes exceed declared totalSizeBytes')
+    }
+
+    if (options.chunkIndex + 1 < options.totalChunks) {
+      const chunkState = {
+        slot,
+        fileName,
+        storedFileName,
+        tempStoredFileName,
+        totalChunks: options.totalChunks,
+        nextChunkIndex: options.chunkIndex + 1,
+        receivedBytes,
+        totalSizeBytes: options.totalSizeBytes,
+        updatedAt: new Date().toISOString()
+      }
+
+      const nextSession: BackendUploadSessionRecord = {
+        ...session,
+        chunkUploads: {
+          ...(session.chunkUploads || {}),
+          [slot]: chunkState
+        }
+      }
+
+      await this.writeSession(nextSession)
+
+      return {
+        sessionId,
+        slot,
+        fileName,
+        sizeBytes: receivedBytes,
+        completed: false,
+        chunkIndex: options.chunkIndex,
+        totalChunks: options.totalChunks
+      }
+    }
+
+    if (typeof options.totalSizeBytes === 'number' && receivedBytes !== options.totalSizeBytes) {
+      throw new BadRequestException('received file size does not match declared totalSizeBytes')
+    }
+
+    await fs.rm(targetPath, { force: true })
+    await fs.rename(tempPath, targetPath)
+
+    const uploaded = {
+      slot,
+      fileName,
+      storedFileName,
+      sizeBytes: receivedBytes,
+      sha256: await this.hashFile(targetPath),
+      uploadedAt: new Date().toISOString(),
+      uploadMode: 'chunked' as const,
+      chunkCount: options.totalChunks
+    }
+
+    const nextSession: BackendUploadSessionRecord = {
+      ...session,
+      files: {
+        ...session.files,
+        [slot]: uploaded
+      },
+      chunkUploads: this.removeChunkUploadState(session.chunkUploads, slot)
+    }
+
+    await this.writeSession(nextSession)
+
+    return {
+      sessionId,
+      slot,
+      fileName,
+      sizeBytes: receivedBytes,
+      sha256: uploaded.sha256,
+      completed: true,
+      chunkIndex: options.chunkIndex,
+      totalChunks: options.totalChunks
     }
   }
 
@@ -497,6 +685,41 @@ export class BackendReleasesService {
     return slot
   }
 
+  private normalizeChunkUploadOptions(input?: UploadSessionFileOptions): NormalizedChunkUploadOptions {
+    const hasChunkFields =
+      input?.chunkIndex !== undefined || input?.totalChunks !== undefined || input?.totalSizeBytes !== undefined
+
+    if (!hasChunkFields) {
+      return { enabled: false }
+    }
+
+    const chunkIndex = this.normalizeIntegerField(input?.chunkIndex, 'chunkIndex', { min: 0 })
+    const totalChunks = this.normalizeIntegerField(input?.totalChunks, 'totalChunks', { min: 1 })
+    if (chunkIndex >= totalChunks) {
+      throw new BadRequestException('chunkIndex must be less than totalChunks')
+    }
+
+    const totalSizeBytes =
+      input?.totalSizeBytes === undefined
+        ? undefined
+        : this.normalizeIntegerField(input.totalSizeBytes, 'totalSizeBytes', { min: 1 })
+
+    return {
+      enabled: true,
+      chunkIndex,
+      totalChunks,
+      totalSizeBytes
+    }
+  }
+
+  private normalizeIntegerField(input: unknown, fieldName: string, options: { min: number }): number {
+    const value = typeof input === 'number' ? input : Number(String(input ?? '').trim())
+    if (!Number.isInteger(value) || value < options.min) {
+      throw new BadRequestException(`${fieldName} must be an integer >= ${options.min}`)
+    }
+    return value
+  }
+
   private async readSession(sessionId: string): Promise<BackendUploadSessionRecord> {
     const session = await readJsonFile<BackendUploadSessionRecord>(this.getSessionFile(sessionId))
     if (!session) {
@@ -524,6 +747,49 @@ export class BackendReleasesService {
   private async cleanupSession(sessionId: string): Promise<void> {
     await fs.rm(this.getSessionFile(sessionId), { force: true })
     await fs.rm(this.getSessionDir(sessionId), { recursive: true, force: true })
+  }
+
+  private removeChunkUploadState(
+    states: BackendUploadSessionRecord['chunkUploads'],
+    slot: BackendUploadSlot
+  ): BackendUploadSessionRecord['chunkUploads'] {
+    if (!states || !states[slot]) {
+      return states
+    }
+
+    const nextStates = { ...states }
+    delete nextStates[slot]
+    return Object.keys(nextStates).length > 0 ? nextStates : undefined
+  }
+
+  private async cleanupSessionSlotArtifacts(
+    sessionDir: string,
+    session: BackendUploadSessionRecord,
+    slot: BackendUploadSlot,
+    nextStoredFileName: string
+  ): Promise<void> {
+    const paths = new Set<string>()
+    const currentUploaded = session.files[slot]
+    const currentChunkUpload = session.chunkUploads?.[slot]
+
+    if (currentUploaded?.storedFileName) {
+      paths.add(join(sessionDir, currentUploaded.storedFileName))
+    }
+
+    if (currentChunkUpload?.storedFileName) {
+      paths.add(join(sessionDir, currentChunkUpload.storedFileName))
+    }
+
+    if (currentChunkUpload?.tempStoredFileName) {
+      paths.add(join(sessionDir, currentChunkUpload.tempStoredFileName))
+    }
+
+    paths.add(join(sessionDir, nextStoredFileName))
+    paths.add(join(sessionDir, `${nextStoredFileName}.part`))
+
+    for (const path of paths) {
+      await fs.rm(path, { force: true })
+    }
   }
 
   private getReleaseDir(version: string): string {
@@ -755,7 +1021,10 @@ export class BackendReleasesService {
   }
 
   private async hashFile(path: string): Promise<string> {
-    const content = await fs.readFile(path)
-    return createHash('sha256').update(content).digest('hex')
+    const hasher = createHash('sha256')
+    for await (const chunk of createReadStream(path)) {
+      hasher.update(chunk)
+    }
+    return hasher.digest('hex')
   }
 }
