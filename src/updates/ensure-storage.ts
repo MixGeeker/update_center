@@ -34,8 +34,16 @@ export async function ensureUpdateStorage(): Promise<void> {
           schemaVersion: 1,
           environmentId: 'mac-prod',
           hostRole: 'mac-mini-m4',
+          agentBaseUrl: 'http://127.0.0.1:3901',
           releaseChannel: 'stable',
           services: ['update_center', 'local_server'],
+          autoUpdate: {
+            enabled: false,
+            dailyWindows: []
+          },
+          manualPolicy: {
+            allowForce: true
+          },
           updatedAt: now
         },
         null,

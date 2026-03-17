@@ -26,7 +26,12 @@ import type {
   BackendChannelState,
   BackendCompatibilityPolicy,
   BackendDeploymentRecord,
+  BackendDeploymentResult,
+  BackendDeploymentStatus,
+  BackendDeploymentTriggerMode,
   BackendEnforceMode,
+  BackendEnvironmentRecord,
+  BackendEnvironmentResolvedRecord,
   BackendMigrationPolicy,
   BackendReleaseDetail,
   BackendReleaseManifest,
@@ -52,6 +57,34 @@ type CreateDeploymentBody = {
   version?: unknown
   environmentId?: unknown
   notes?: unknown
+  triggerMode?: unknown
+  force?: unknown
+  requestedBy?: unknown
+}
+
+type UpdateDeploymentBody = {
+  status?: unknown
+  claimedBy?: unknown
+  step?: unknown
+  blockReasons?: unknown
+  startedAt?: unknown
+  finishedAt?: unknown
+  result?: unknown
+  currentVersion?: unknown
+  desiredVersion?: unknown
+  imageDownloadUrl?: unknown
+}
+
+type UpsertEnvironmentBody = {
+  hostRole?: unknown
+  agentBaseUrl?: unknown
+  releaseChannel?: unknown
+  pinnedVersion?: unknown
+  currentVersion?: unknown
+  desiredVersion?: unknown
+  services?: unknown
+  autoUpdate?: unknown
+  manualPolicy?: unknown
 }
 
 type UploadSessionFileOptions = {
@@ -618,10 +651,16 @@ export class BackendReleasesService {
   }
 
   async createDeployment(body: CreateDeploymentBody | undefined): Promise<BackendDeploymentRecord> {
-    const channel = normalizeBackendChannel(this.normalizeOptionalString(body?.channel) || 'stable')
+    const environmentId = this.normalizeOptionalString(body?.environmentId) || 'mac-prod'
+    const environment = await this.getOrCreateEnvironment(environmentId)
+    const channel = normalizeBackendChannel(
+      this.normalizeOptionalString(body?.channel) || environment.releaseChannel || 'stable'
+    )
     const state = await this.readChannelState(channel)
     const explicitVersion = this.normalizeOptionalString(body?.version)
-    const requestedVersion = normalizeVersion(explicitVersion || state.currentVersion || '')
+    const requestedVersion = normalizeVersion(
+      explicitVersion || environment.desiredVersion || environment.pinnedVersion || state.currentVersion || ''
+    )
     validateVersionSafe(requestedVersion)
 
     if (!(await pathExists(this.getReleaseDir(requestedVersion)))) {
@@ -634,16 +673,34 @@ export class BackendReleasesService {
     const record: BackendDeploymentRecord = {
       schemaVersion: 1,
       deploymentId,
-      environmentId: this.normalizeOptionalString(body?.environmentId) || 'mac-prod',
+      environmentId,
       channel,
       requestedVersion,
       status: 'pending',
+      triggerMode: this.normalizeTriggerMode(body?.triggerMode),
       createdAt: now,
       updatedAt: now,
       notes: this.normalizeOptionalString(body?.notes),
+      force: this.normalizeBoolean(body?.force),
+      requestedBy: this.normalizeOptionalString(body?.requestedBy),
+      desiredVersion: requestedVersion,
       compatibility: compatibility || undefined
     }
 
+    const release = await this.getRelease(requestedVersion)
+    record.artifactBasePath = release.artifactBasePath
+    record.imageDownloadUrl = release.imageDownloadUrl
+    record.manifestDownloadUrl = release.manifestDownloadUrl
+    record.checksumsDownloadUrl = release.checksumsDownloadUrl
+
+    const nextEnvironment: BackendEnvironmentRecord = {
+      ...environment,
+      desiredVersion: requestedVersion,
+      updatedAt: now,
+      updatedBy: record.requestedBy || environment.updatedBy
+    }
+
+    await this.writeEnvironment(nextEnvironment)
     await writeJsonFile(this.getDeploymentFile(deploymentId), record)
     return record
   }
@@ -660,7 +717,7 @@ export class BackendReleasesService {
 
       const record = await readJsonFile<BackendDeploymentRecord>(join(this.paths.backendDeploymentsDir, entry.name))
       if (record) {
-        deployments.push(record)
+        deployments.push(this.normalizeDeploymentRecord(record, entry.name.slice(0, -'.json'.length)))
       }
     }
 
@@ -674,7 +731,153 @@ export class BackendReleasesService {
     if (!record) {
       throw new NotFoundException(`backend deployment not found: ${deploymentId}`)
     }
-    return record
+    return this.normalizeDeploymentRecord(record, deploymentId)
+  }
+
+  async updateDeployment(
+    deploymentIdInput: string,
+    body: UpdateDeploymentBody | undefined
+  ): Promise<BackendDeploymentRecord> {
+    const current = await this.getDeployment(deploymentIdInput)
+    const hasCurrentVersionUpdate = body?.currentVersion !== undefined
+    const hasDesiredVersionUpdate = body?.desiredVersion !== undefined
+    const nextStatus =
+      body?.status === undefined ? current.status : this.normalizeDeploymentStatus(body.status)
+    const blockReasons =
+      body?.blockReasons === undefined ? current.blockReasons : this.normalizeStringList(body.blockReasons)
+    const result = body?.result === undefined ? current.result : this.normalizeOptionalResult(body.result)
+    const currentVersion =
+      body?.currentVersion === undefined
+        ? current.currentVersion
+        : this.normalizeOptionalVersionField(body.currentVersion, 'currentVersion')
+    const desiredVersion =
+      body?.desiredVersion === undefined
+        ? current.desiredVersion
+        : this.normalizeOptionalVersionField(body.desiredVersion, 'desiredVersion')
+    const imageDownloadUrl =
+      body?.imageDownloadUrl === undefined
+        ? current.imageDownloadUrl
+        : this.normalizeOptionalString(body.imageDownloadUrl)
+
+    const nextRecord: BackendDeploymentRecord = {
+      ...current,
+      status: nextStatus,
+      claimedBy: body?.claimedBy === undefined ? current.claimedBy : this.normalizeOptionalString(body.claimedBy),
+      step: body?.step === undefined ? current.step : this.normalizeOptionalString(body.step),
+      blockReasons,
+      startedAt: body?.startedAt === undefined ? current.startedAt : this.normalizeOptionalString(body.startedAt),
+      finishedAt: body?.finishedAt === undefined ? current.finishedAt : this.normalizeOptionalString(body.finishedAt),
+      result,
+      currentVersion,
+      desiredVersion,
+      imageDownloadUrl,
+      updatedAt: new Date().toISOString()
+    }
+
+    await writeJsonFile(this.getDeploymentFile(nextRecord.deploymentId), nextRecord)
+
+    if (nextStatus === 'succeeded' || nextStatus === 'rolled_back' || hasCurrentVersionUpdate || hasDesiredVersionUpdate) {
+      const environment = await this.getOrCreateEnvironment(nextRecord.environmentId)
+      const nextEnvironment: BackendEnvironmentRecord = {
+        ...environment,
+        currentVersion:
+          nextStatus === 'succeeded' || nextStatus === 'rolled_back' || hasCurrentVersionUpdate
+            ? currentVersion
+            : environment.currentVersion,
+        desiredVersion:
+          nextStatus === 'succeeded' || nextStatus === 'rolled_back' || hasDesiredVersionUpdate
+            ? desiredVersion
+            : environment.desiredVersion,
+        updatedAt: new Date().toISOString(),
+        updatedBy: nextRecord.claimedBy || environment.updatedBy
+      }
+      await this.writeEnvironment(nextEnvironment)
+    }
+
+    return nextRecord
+  }
+
+  async listEnvironments(): Promise<{ environments: BackendEnvironmentResolvedRecord[] }> {
+    await fs.mkdir(this.paths.backendEnvironmentsDir, { recursive: true })
+    const entries = await fs.readdir(this.paths.backendEnvironmentsDir, { withFileTypes: true })
+    const environments: BackendEnvironmentResolvedRecord[] = []
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue
+      }
+
+      const environmentId = entry.name.slice(0, -'.json'.length)
+      environments.push(await this.getResolvedEnvironment(environmentId))
+    }
+
+    environments.sort((a, b) => a.environmentId.localeCompare(b.environmentId))
+    return { environments }
+  }
+
+  async getEnvironment(environmentIdInput: string): Promise<BackendEnvironmentRecord> {
+    const environment = await this.readEnvironment(environmentIdInput)
+    if (!environment) {
+      throw new NotFoundException(`backend environment not found: ${environmentIdInput}`)
+    }
+    return environment
+  }
+
+  async getResolvedEnvironment(environmentIdInput: string): Promise<BackendEnvironmentResolvedRecord> {
+    const environment = await this.getOrCreateEnvironment(environmentIdInput)
+    const channelState = await this.readChannelState(environment.releaseChannel)
+    const channelCurrentVersion = channelState.currentVersion
+    const resolvedDesiredVersion = normalizeVersion(
+      environment.desiredVersion || environment.pinnedVersion || channelCurrentVersion || ''
+    ) || undefined
+
+    return {
+      ...environment,
+      channelCurrentVersion,
+      resolvedDesiredVersion
+    }
+  }
+
+  async upsertEnvironment(
+    environmentIdInput: string,
+    body: UpsertEnvironmentBody | undefined,
+    options?: { actor?: string }
+  ): Promise<BackendEnvironmentResolvedRecord> {
+    const current = await this.getOrCreateEnvironment(environmentIdInput)
+    const nextEnvironment: BackendEnvironmentRecord = {
+      ...current,
+      environmentId: current.environmentId,
+      hostRole: body?.hostRole === undefined ? current.hostRole : this.normalizeOptionalString(body.hostRole),
+      agentBaseUrl:
+        body?.agentBaseUrl === undefined ? current.agentBaseUrl : this.normalizeOptionalString(body.agentBaseUrl),
+      releaseChannel:
+        body?.releaseChannel === undefined
+          ? current.releaseChannel
+          : normalizeBackendChannel(String(body.releaseChannel ?? '')),
+      pinnedVersion:
+        body?.pinnedVersion === undefined
+          ? current.pinnedVersion
+          : this.normalizeOptionalVersionField(body.pinnedVersion, 'pinnedVersion'),
+      currentVersion:
+        body?.currentVersion === undefined
+          ? current.currentVersion
+          : this.normalizeOptionalVersionField(body.currentVersion, 'currentVersion'),
+      desiredVersion:
+        body?.desiredVersion === undefined
+          ? current.desiredVersion
+          : this.normalizeOptionalVersionField(body.desiredVersion, 'desiredVersion'),
+      services:
+        body?.services === undefined ? current.services : this.normalizeServiceList(body.services, current.services),
+      autoUpdate:
+        body?.autoUpdate === undefined ? current.autoUpdate : this.normalizeAutoUpdatePolicy(body.autoUpdate),
+      manualPolicy:
+        body?.manualPolicy === undefined ? current.manualPolicy : this.normalizeManualPolicy(body.manualPolicy),
+      updatedAt: new Date().toISOString(),
+      updatedBy: options?.actor ? String(options.actor).trim() : current.updatedBy
+    }
+
+    await this.writeEnvironment(nextEnvironment)
+    return this.getResolvedEnvironment(nextEnvironment.environmentId)
   }
 
   private normalizeUploadSlot(slotInput: string): BackendUploadSlot {
@@ -742,6 +945,10 @@ export class BackendReleasesService {
 
   private getDeploymentFile(deploymentId: string): string {
     return join(this.paths.backendDeploymentsDir, `${sanitizeFileName(deploymentId, 'deploymentId')}.json`)
+  }
+
+  private getEnvironmentFile(environmentId: string): string {
+    return join(this.paths.backendEnvironmentsDir, `${sanitizeFileName(environmentId, 'environmentId')}.json`)
   }
 
   private async cleanupSession(sessionId: string): Promise<void> {
@@ -878,6 +1085,19 @@ export class BackendReleasesService {
 
     const protectedReasons = this.getProtectedReasons(normalizeVersion(version), testing, stable)
 
+    const imageDownloadUrl = manifest?.image?.fileName
+      ? this.buildBackendArtifactUrl(version, manifest.image.fileName)
+      : undefined
+    const manifestDownloadUrl = manifest ? this.buildBackendArtifactUrl(version, 'release-manifest.json') : undefined
+    const checksumsFileName = manifest?.checksums?.fileName
+      ? manifest.checksums.fileName
+      : (await pathExists(join(releaseDir, 'checksums.txt')))
+        ? 'checksums.txt'
+        : undefined
+    const checksumsDownloadUrl = checksumsFileName
+      ? this.buildBackendArtifactUrl(version, checksumsFileName)
+      : undefined
+
     return {
       version,
       sizeBytes: stats.sizeBytes,
@@ -887,8 +1107,251 @@ export class BackendReleasesService {
       protected: protectedReasons.length > 0,
       protectedReasons,
       hasCompatibility: await pathExists(this.getCompatibilityFile(version)),
+      artifactBasePath: `/backend/releases/${encodeURIComponent(version)}`,
+      downloadUrl: imageDownloadUrl,
+      imageDownloadUrl,
+      manifestDownloadUrl,
+      checksumsDownloadUrl,
       manifest: manifest || undefined
     }
+  }
+
+  private async readEnvironment(environmentIdInput: string): Promise<BackendEnvironmentRecord | undefined> {
+    const environmentId = sanitizeFileName(environmentIdInput, 'environmentId')
+    const record = await readJsonFile<BackendEnvironmentRecord>(this.getEnvironmentFile(environmentId))
+    return record ? this.normalizeEnvironmentRecord(record, environmentId) : undefined
+  }
+
+  private async getOrCreateEnvironment(environmentIdInput: string): Promise<BackendEnvironmentRecord> {
+    const environmentId = sanitizeFileName(environmentIdInput, 'environmentId')
+    const existing = await this.readEnvironment(environmentId)
+    if (existing) {
+      return this.normalizeEnvironmentRecord(existing, environmentId)
+    }
+
+    const now = new Date().toISOString()
+    const created: BackendEnvironmentRecord = {
+      schemaVersion: 1,
+      environmentId,
+      hostRole: environmentId,
+      agentBaseUrl: undefined,
+      releaseChannel: 'stable',
+      services: ['local_server'],
+      autoUpdate: {
+        enabled: false,
+        dailyWindows: []
+      },
+      manualPolicy: {
+        allowForce: true
+      },
+      updatedAt: now
+    }
+
+    await this.writeEnvironment(created)
+    return created
+  }
+
+  private normalizeEnvironmentRecord(
+    input: Partial<BackendEnvironmentRecord>,
+    environmentId: string
+  ): BackendEnvironmentRecord {
+    return {
+      schemaVersion: 1,
+      environmentId,
+      hostRole: this.normalizeOptionalString(input.hostRole),
+      agentBaseUrl: this.normalizeOptionalString(input.agentBaseUrl),
+      releaseChannel: input.releaseChannel === 'testing' ? 'testing' : 'stable',
+      pinnedVersion: this.normalizeOptionalVersionField(input.pinnedVersion, 'pinnedVersion'),
+      currentVersion: this.normalizeOptionalVersionField(input.currentVersion, 'currentVersion'),
+      desiredVersion: this.normalizeOptionalVersionField(input.desiredVersion, 'desiredVersion'),
+      services: this.normalizeServiceList(input.services, ['local_server']),
+      autoUpdate: this.normalizeAutoUpdatePolicy(input.autoUpdate),
+      manualPolicy: this.normalizeManualPolicy(input.manualPolicy),
+      updatedAt: this.normalizeOptionalString(input.updatedAt) || new Date().toISOString(),
+      updatedBy: this.normalizeOptionalString(input.updatedBy)
+    }
+  }
+
+  private normalizeDeploymentRecord(
+    input: Partial<BackendDeploymentRecord>,
+    fallbackDeploymentId: string
+  ): BackendDeploymentRecord {
+    return {
+      schemaVersion: 1,
+      deploymentId: sanitizeFileName(input.deploymentId || fallbackDeploymentId, 'deploymentId'),
+      environmentId: this.normalizeOptionalString(input.environmentId) || 'mac-prod',
+      channel: input.channel === 'testing' ? 'testing' : 'stable',
+      requestedVersion: this.normalizeRequiredVersion(input.requestedVersion, 'requestedVersion'),
+      status: this.normalizePersistedDeploymentStatus(input.status),
+      triggerMode: this.normalizeTriggerMode(input.triggerMode),
+      createdAt: this.normalizeOptionalString(input.createdAt) || new Date().toISOString(),
+      updatedAt: this.normalizeOptionalString(input.updatedAt) || new Date().toISOString(),
+      notes: this.normalizeOptionalString(input.notes),
+      force: typeof input.force === 'boolean' ? input.force : this.normalizeBoolean(input.force),
+      requestedBy: this.normalizeOptionalString(input.requestedBy),
+      claimedBy: this.normalizeOptionalString(input.claimedBy),
+      step: this.normalizeOptionalString(input.step),
+      blockReasons: Array.isArray(input.blockReasons)
+        ? input.blockReasons
+            .filter((item): item is string => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : undefined,
+      startedAt: this.normalizeOptionalString(input.startedAt),
+      finishedAt: this.normalizeOptionalString(input.finishedAt),
+      currentVersion: this.normalizeOptionalVersionField(input.currentVersion, 'currentVersion'),
+      desiredVersion: this.normalizeOptionalVersionField(input.desiredVersion, 'desiredVersion'),
+      result: this.normalizeOptionalResult(input.result),
+      artifactBasePath: this.normalizeOptionalString(input.artifactBasePath),
+      imageDownloadUrl: this.normalizeOptionalString(input.imageDownloadUrl),
+      manifestDownloadUrl: this.normalizeOptionalString(input.manifestDownloadUrl),
+      checksumsDownloadUrl: this.normalizeOptionalString(input.checksumsDownloadUrl),
+      compatibility: input.compatibility || undefined
+    }
+  }
+
+  private async writeEnvironment(environment: BackendEnvironmentRecord): Promise<void> {
+    await writeJsonFile(this.getEnvironmentFile(environment.environmentId), environment)
+  }
+
+  private buildBackendArtifactUrl(version: string, fileName: string): string {
+    return `/backend/releases/${encodeURIComponent(version)}/${encodeURIComponent(fileName)}`
+  }
+
+  private normalizeTriggerMode(input: unknown): BackendDeploymentTriggerMode {
+    const value = this.normalizeOptionalString(input)?.toLowerCase()
+    if (value === 'auto' || value === 'rescue') {
+      return value
+    }
+    return 'manual'
+  }
+
+  private normalizeDeploymentStatus(input: unknown): BackendDeploymentStatus {
+    const value = this.normalizeOptionalString(input)?.toLowerCase()
+    if (
+      value === 'pending' ||
+      value === 'claimed' ||
+      value === 'running' ||
+      value === 'blocked' ||
+      value === 'succeeded' ||
+      value === 'failed' ||
+      value === 'rolled_back'
+    ) {
+      return value
+    }
+
+    throw new BadRequestException('invalid backend deployment status')
+  }
+
+  private normalizePersistedDeploymentStatus(input: unknown): BackendDeploymentStatus {
+    try {
+      return this.normalizeDeploymentStatus(input)
+    } catch {
+      return 'pending'
+    }
+  }
+
+  private normalizeOptionalRecord(input: unknown): Record<string, unknown> | undefined {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      return undefined
+    }
+    return input as Record<string, unknown>
+  }
+
+  private normalizeOptionalResult(input: unknown): BackendDeploymentResult | undefined {
+    const text = this.normalizeOptionalString(input)
+    if (text) {
+      return text
+    }
+
+    return this.normalizeOptionalRecord(input)
+  }
+
+  private normalizeBoolean(input: unknown): boolean | undefined {
+    if (typeof input === 'boolean') {
+      return input
+    }
+
+    if (typeof input === 'string') {
+      const normalized = input.trim().toLowerCase()
+      if (normalized === 'true') return true
+      if (normalized === 'false') return false
+    }
+
+    return undefined
+  }
+
+  private normalizeOptionalVersionField(input: unknown, fieldName: string): string | undefined {
+    const value = this.normalizeOptionalString(input)
+    if (!value) {
+      return undefined
+    }
+
+    const normalized = normalizeVersion(value)
+    validateVersionSafe(normalized, fieldName)
+    return normalized
+  }
+
+  private normalizeStringList(input: unknown): string[] | undefined {
+    if (input === undefined) {
+      return undefined
+    }
+
+    if (!Array.isArray(input)) {
+      throw new BadRequestException('expected string array')
+    }
+
+    const normalized = input
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item, index, list) => item.length > 0 && list.indexOf(item) === index)
+
+    return normalized
+  }
+
+  private normalizeServiceList(input: unknown, fallback: string[]): string[] {
+    const normalized = this.normalizeStringList(input)
+    if (!normalized || normalized.length === 0) {
+      return [...fallback]
+    }
+    return normalized
+  }
+
+  private normalizeAutoUpdatePolicy(input: unknown): BackendEnvironmentRecord['autoUpdate'] {
+    const candidate = this.normalizeOptionalRecord(input)
+    const dailyWindows = (() => {
+      const raw = candidate?.dailyWindows
+      if (!Array.isArray(raw)) {
+        return []
+      }
+
+      return raw
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
+        .map((item) => ({
+          start: this.normalizeTimeWindowValue(item.start, 'autoUpdate.dailyWindows.start'),
+          end: this.normalizeTimeWindowValue(item.end, 'autoUpdate.dailyWindows.end')
+        }))
+    })()
+
+    return {
+      enabled: typeof candidate?.enabled === 'boolean' ? candidate.enabled : false,
+      dailyWindows
+    }
+  }
+
+  private normalizeManualPolicy(input: unknown): BackendEnvironmentRecord['manualPolicy'] {
+    const candidate = this.normalizeOptionalRecord(input)
+    return {
+      allowForce: typeof candidate?.allowForce === 'boolean' ? candidate.allowForce : true
+    }
+  }
+
+  private normalizeTimeWindowValue(input: unknown, fieldName: string): string {
+    const value = this.normalizeOptionalString(input)
+    if (!value || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+      throw new BadRequestException(`invalid ${fieldName}`)
+    }
+    return value
   }
 
   private normalizeChannelHint(input: unknown): 'draft' | BackendChannel {
@@ -1028,3 +1491,16 @@ export class BackendReleasesService {
     return hasher.digest('hex')
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

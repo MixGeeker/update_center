@@ -32,6 +32,10 @@ type CompatibilityBody = Record<string, unknown>
 
 type CreateDeploymentBody = Record<string, unknown>
 
+type UpdateDeploymentBody = Record<string, unknown>
+
+type UpdateEnvironmentBody = Record<string, unknown>
+
 @Controller('admin')
 @UseGuards(AdminAuthGuard)
 export class BackendReleasesController {
@@ -113,6 +117,33 @@ export class BackendReleasesController {
     return this.backendReleasesService.getCompatibility(version)
   }
 
+  @Get('backend-environments')
+  listEnvironments() {
+    return this.backendReleasesService.listEnvironments()
+  }
+
+  @Get('backend-environments/:environmentId')
+  getEnvironment(@Param('environmentId') environmentId: string) {
+    return this.backendReleasesService.getEnvironment(environmentId)
+  }
+
+  @Get('backend-environments/:environmentId/resolved')
+  getResolvedEnvironment(@Param('environmentId') environmentId: string) {
+    return this.backendReleasesService.getResolvedEnvironment(environmentId)
+  }
+
+  @Put('backend-environments/:environmentId')
+  upsertEnvironment(
+    @Param('environmentId') environmentId: string,
+    @Body() body: UpdateEnvironmentBody,
+    @Req() req: { headers?: Record<string, string | string[] | undefined> }
+  ) {
+    const actor = req?.headers?.['x-uname-actor']
+    return this.backendReleasesService.upsertEnvironment(environmentId, body, {
+      actor: Array.isArray(actor) ? actor[0] : actor
+    })
+  }
+
   @Post('backend-deployments')
   createDeployment(@Body() body: CreateDeploymentBody) {
     return this.backendReleasesService.createDeployment(body)
@@ -126,5 +157,10 @@ export class BackendReleasesController {
   @Get('backend-deployments/:deploymentId')
   getDeployment(@Param('deploymentId') deploymentId: string) {
     return this.backendReleasesService.getDeployment(deploymentId)
+  }
+
+  @Put('backend-deployments/:deploymentId')
+  updateDeployment(@Param('deploymentId') deploymentId: string, @Body() body: UpdateDeploymentBody) {
+    return this.backendReleasesService.updateDeployment(deploymentId, body)
   }
 }

@@ -6,6 +6,19 @@ export type BackendMigrationPolicy = 'none' | 'before-deploy' | 'after-deploy'
 
 export type BackendUploadSlot = 'image' | 'checksums'
 
+export type BackendDeploymentStatus =
+  | 'pending'
+  | 'claimed'
+  | 'running'
+  | 'blocked'
+  | 'succeeded'
+  | 'failed'
+  | 'rolled_back'
+
+export type BackendDeploymentTriggerMode = 'manual' | 'auto' | 'rescue'
+
+export type BackendDeploymentResult = string | Record<string, unknown>
+
 export interface BackendChannelState {
   currentVersion?: string
   previousVersions: string[]
@@ -93,7 +106,47 @@ export interface BackendReleaseDetail {
   protected: boolean
   protectedReasons: string[]
   hasCompatibility: boolean
+  artifactBasePath?: string
+  downloadUrl?: string
+  imageDownloadUrl?: string
+  manifestDownloadUrl?: string
+  checksumsDownloadUrl?: string
   manifest?: BackendReleaseManifest
+}
+
+export interface BackendEnvironmentWindow {
+  start: string
+  end: string
+}
+
+export interface BackendEnvironmentAutoUpdatePolicy {
+  enabled: boolean
+  dailyWindows: BackendEnvironmentWindow[]
+}
+
+export interface BackendEnvironmentManualPolicy {
+  allowForce: boolean
+}
+
+export interface BackendEnvironmentRecord {
+  schemaVersion: 1
+  environmentId: string
+  hostRole?: string
+  agentBaseUrl?: string
+  releaseChannel: BackendChannel
+  pinnedVersion?: string
+  currentVersion?: string
+  desiredVersion?: string
+  services: string[]
+  autoUpdate: BackendEnvironmentAutoUpdatePolicy
+  manualPolicy: BackendEnvironmentManualPolicy
+  updatedAt: string
+  updatedBy?: string
+}
+
+export interface BackendEnvironmentResolvedRecord extends BackendEnvironmentRecord {
+  channelCurrentVersion?: string
+  resolvedDesiredVersion?: string
 }
 
 export interface BackendDeploymentRecord {
@@ -102,9 +155,27 @@ export interface BackendDeploymentRecord {
   environmentId: string
   channel: BackendChannel
   requestedVersion: string
-  status: 'pending' | 'running' | 'succeeded' | 'failed'
+  status: BackendDeploymentStatus
+  triggerMode: BackendDeploymentTriggerMode
   createdAt: string
   updatedAt: string
   notes?: string
+  force?: boolean
+  requestedBy?: string
+  claimedBy?: string
+  step?: string
+  blockReasons?: string[]
+  startedAt?: string
+  finishedAt?: string
+  currentVersion?: string
+  desiredVersion?: string
+  result?: BackendDeploymentResult
+  artifactBasePath?: string
+  imageDownloadUrl?: string
+  manifestDownloadUrl?: string
+  checksumsDownloadUrl?: string
   compatibility?: BackendCompatibilityPolicy
 }
+
+
+

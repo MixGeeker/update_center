@@ -8,7 +8,7 @@
 - 提供 **管理面板**（发布 stable、回滚）：`/admin/`（需要 Token）
 - 提供 **网页下载页与“最新直链”**（给用户手动下载安装）：`/download/`、`/api/downloads/...`
 - 提供 **后端发布管理 API**：backend release 上传、testing/stable 双渠道流转、桌面端兼容策略映射
-- 提供 **后端部署任务队列**：创建部署任务记录，作为后续宿主执行器（deploy-agent）的控制面
+- 提供 **后端环境与部署控制面**：环境期望状态、部署任务队列与 agent 状态回写
 - 提供 **健康检查**：`/api/health`（Docker healthcheck 会用到）
 
 > 注意：仓库根目录不是单一 Git 仓库；`update_center/` 是一个独立模块（内有自己的 `.git/`）。请在 `update_center/` 目录执行安装/构建/运行命令。
@@ -42,11 +42,18 @@
   - `PUT /api/admin/backend-compatibility/<backendVersion>`：写入桌面端兼容策略
   - `GET /api/admin/backend-compatibility/<backendVersion>`：查询指定后端版本的兼容策略
   - `GET /api/admin/backend-compatibility/active`：查询当前 stable 后端版本对应的兼容策略
+  - `GET /api/admin/backend-environments`：列出后端环境（返回 resolved desired state）
+  - `GET /api/admin/backend-environments/<environmentId>`：查询单个后端环境原始记录
+  - `GET /api/admin/backend-environments/<environmentId>/resolved`：查询单个后端环境的解析态（含渠道当前版本与 resolvedDesiredVersion）
+  - `PUT /api/admin/backend-environments/<environmentId>`：写入/更新后端环境配置，落盘到 `backend/runtime/environments/<environmentId>.json`
   - `POST /api/admin/backend-deployments`：创建后端部署任务
   - `GET /api/admin/backend-deployments`：查询后端部署任务列表
   - `GET /api/admin/backend-deployments/<deploymentId>`：查询单个部署任务
+  - `PUT /api/admin/backend-deployments/<deploymentId>`：deploy-agent 回写状态、步骤、阻塞原因、执行结果与当前版本
 - **更新资源（静态目录）**：`GET /updates/<channel>/...`
   - 典型：`/updates/stable/latest.yml`、`/updates/stable/<installer>`
+- **后端发布产物（静态目录）**：`GET /backend/releases/<version>/<file>`
+  - 典型：`/backend/releases/1.2.3/release-manifest.json`、`/backend/releases/1.2.3/uname-erp-server-1.2.3-arm64.tar`
 - **网页下载（给浏览器用户）**
   - 下载页：`GET /download/`
   - 查询（JSON）：`GET /api/downloads/<channel>/latest`
@@ -437,7 +444,50 @@ curl -X POST \
   http://localhost:8600/api/admin/backend-deployments
 ```
 
-这一步会生成 `backend/runtime/deployments/<deploymentId>.json`。当前它是发布控制面的任务落盘能力，后续可由 `deploy-agent` 认领执行。
+这一步会生成 `backend/runtime/deployments/<deploymentId>.json`。创建部署时，环境文件也会同步更新 `desiredVersion`，让控制面保留当前目标状态。
+
+### 8) 环境控制面与 agent 回写
+
+后端环境配置落盘在 `backend/runtime/environments/*.json`，用于描述单个宿主的期望状态。`mac-prod.json` 会在启动时自动 seed。
+
+环境 API：
+
+- `GET /api/admin/backend-environments`
+- `GET /api/admin/backend-environments/<environmentId>`
+- `GET /api/admin/backend-environments/<environmentId>/resolved`
+- `PUT /api/admin/backend-environments/<environmentId>`
+
+其中 resolved 响应会额外返回：
+
+- `channelCurrentVersion`
+- `resolvedDesiredVersion`
+
+部署记录支持 agent 用 `PUT /api/admin/backend-deployments/<deploymentId>` 回写以下字段：
+
+- `status`
+- `claimedBy`
+- `step`
+- `blockReasons`
+- `startedAt`
+- `finishedAt`
+- `result`
+- `currentVersion`
+- `desiredVersion`
+
+当 agent 回写 `currentVersion` / `desiredVersion`，或将状态推进到 `succeeded` / `rolled_back` 时，环境文件会同步刷新，以便控制面反映实际状态。
+
+后端产物下载入口为公开静态路径：
+
+- `/backend/releases/<version>/release-manifest.json`
+- `/backend/releases/<version>/<image-file>.tar`
+- `/backend/releases/<version>/checksums.txt`
+
+同时，`GET /api/admin/backend-releases/<version>` / `details` 的返回里会带上：
+
+- `artifactBasePath`
+- `imageDownloadUrl`
+- `manifestDownloadUrl`
+- `checksumsDownloadUrl`
 
 ---
 
@@ -557,3 +607,4 @@ curl -X DELETE -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" "http://localhost
 
 1. 优先修正宿主机目录权限/属主，让容器用户（默认 `1001:1001`）可读写
 2. 临时方案：在 `.env` 中将 `UPDATE_CENTER_USER=0:0`（不推荐长期使用）
+
