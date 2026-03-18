@@ -5,7 +5,7 @@
 它现在的职责是：
 
 - 对外提供 **静态更新资源**（供 `electron-updater` / Generic Provider 拉取）：`/updates/<channel>/...`
-- 提供 **管理面板**（发布 stable、回滚）：`/admin/`（需要 Token）
+- 提供 **管理面板**（桌面端 / 后端双 TAB）：`/admin/`（需要 Token）
 - 提供 **网页下载页与“最新直链”**（给用户手动下载安装）：`/download/`、`/api/downloads/...`
 - 提供 **后端发布管理 API**：backend release 上传、testing/stable 双渠道流转、桌面端兼容策略映射
 - 提供 **后端环境与部署控制面**：环境期望状态、部署任务队列与 agent 状态回写
@@ -18,7 +18,7 @@
 ## 访问入口与接口一览
 
 - **健康检查**：`GET /api/health`
-- **管理面板（静态页）**：`GET /admin/`
+- **管理面板（静态页）**：`GET /admin/`（桌面端更新 / 后端发布双 TAB）
 - **管理 API（需 Bearer Token）**
   - `GET /api/admin/releases`：列出已上传的版本目录
   - `GET /api/admin/releases/details`：列出版本详情（大小/文件数/保护状态）
@@ -53,7 +53,7 @@
 - **更新资源（静态目录）**：`GET /updates/<channel>/...`
   - 典型：`/updates/stable/latest.yml`、`/updates/stable/<installer>`
 - **后端发布产物（静态目录）**：`GET /backend/releases/<version>/<file>`
-  - 典型：`/backend/releases/1.2.3/release-manifest.json`、`/backend/releases/1.2.3/uname-erp-server-1.2.3-arm64.tar`
+  - 典型：`/backend/releases/1.2.3/release-manifest.json`、`/backend/releases/1.2.3/uname-erp-server-1.2.3-linux-arm64.tar`
 - **网页下载（给浏览器用户）**
   - 下载页：`GET /download/`
   - 查询（JSON）：`GET /api/downloads/<channel>/latest`
@@ -87,7 +87,7 @@
     releases/
       <version>/
         release-manifest.json
-        uname-erp-server-<version>-arm64.tar
+        uname-erp-server-<version>-linux-arm64.tar
         checksums.txt
     channels/
       testing/
@@ -316,14 +316,14 @@ rsync -av ./dist/ user@server:/data/update_center/updates/releases/0.5.2/
 ```text
 backend/releases/<version>/
   release-manifest.json
-  uname-erp-server-<version>-arm64.tar
+  uname-erp-server-<version>-linux-arm64.tar
   checksums.txt
 ```
 
 其中：
 
 - `release-manifest.json`：描述镜像 tar 文件名、tag、构建提交、迁移策略、compose profiles 等
-- `*.tar`：`docker save` 导出的 `linux/arm64` 镜像包
+- `*.tar`：`docker save` 导出的 `linux/arm64` 镜像包；文件名无需固定模板，常见为 `uname-erp-server-<version>-linux-arm64.tar`
 - `checksums.txt`：校验文件；若 CI 未上传，服务会在 finalize 时自动生成
 
 ### 2) 创建 upload session
@@ -347,8 +347,8 @@ curl -X POST \
 curl -X POST \
   -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
   -H "Content-Type: application/octet-stream" \
-  --data-binary "@./uname-erp-server-1.2.3-arm64.tar" \
-  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/image?fileName=uname-erp-server-1.2.3-arm64.tar"
+  --data-binary "@./uname-erp-server-1.2.3-linux-arm64.tar" \
+  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/image?fileName=uname-erp-server-1.2.3-linux-arm64.tar"
 ```
 
 可选：上传 `checksums.txt`
@@ -368,7 +368,7 @@ curl -X POST \
   -H "Authorization: Bearer <UPDATE_ADMIN_TOKEN>" \
   -H "Content-Type: application/octet-stream" \
   --data-binary "@./chunk-000.bin" \
-  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/image?fileName=uname-erp-server-1.2.3-arm64.tar&chunkIndex=0&totalChunks=4&totalSizeBytes=734003200"
+  "http://localhost:8600/api/admin/backend-releases/upload-sessions/<sessionId>/files/image?fileName=uname-erp-server-1.2.3-linux-arm64.tar&chunkIndex=0&totalChunks=4&totalSizeBytes=734003200"
 ```
 
 说明：
@@ -497,8 +497,11 @@ curl -X POST \
 
 1. 打开 `http://<host>:8600/admin/`
 2. 在页面中填写 `UPDATE_ADMIN_TOKEN`（仅存浏览器 localStorage，不会上传）
-3. 点击“刷新”，确认能看到 releases 列表
-4. 对目标版本点击“发布到 stable”
+3. 在顶部 TAB 选择对应区域：
+   - `桌面端更新`：桌面端 release / stable 管理
+   - `后端发布`：后端版本、渠道、兼容策略、环境、部署任务管理
+4. 点击“刷新”，确认能看到对应列表
+5. 对目标版本点击相应的“发布到 stable”按钮
 
 ### 方式 2：调用 API（便于脚本化）
 

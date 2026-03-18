@@ -5,66 +5,691 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Update Center 管理面板</title>
     <style>
-      :root { color-scheme: light dark; }
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 24px; }
-      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-      input { padding: 8px 10px; min-width: 320px; }
-      button { padding: 8px 12px; cursor: pointer; }
-      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-      th, td { border: 1px solid rgba(127,127,127,0.35); padding: 10px; text-align: left; }
-      th { background: rgba(127,127,127,0.15); }
-      .muted { opacity: 0.75; }
-      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(127,127,127,0.2); }
-      .danger { background: rgba(220,38,38,0.2); }
-      .ok { background: rgba(34,197,94,0.2); }
-      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(127,127,127,0.18); margin-left: 6px; }
-      pre { background: rgba(127,127,127,0.12); padding: 12px; overflow: auto; }
+      :root {
+        color-scheme: light dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        margin: 24px;
+      }
+
+      input,
+      select,
+      textarea,
+      button {
+        font: inherit;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid rgba(127, 127, 127, 0.35);
+        border-radius: 8px;
+        background: rgba(127, 127, 127, 0.04);
+      }
+
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+      }
+
+      button {
+        padding: 8px 12px;
+        cursor: pointer;
+        border: 1px solid rgba(127, 127, 127, 0.35);
+        border-radius: 999px;
+        background: rgba(127, 127, 127, 0.12);
+      }
+
+      button:hover {
+        background: rgba(127, 127, 127, 0.2);
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .topbar {
+        margin-bottom: 16px;
+      }
+
+      .token-input {
+        min-width: min(420px, 100%);
+        flex: 1;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin: 20px 0 16px;
+      }
+
+      .tab-button {
+        min-width: 120px;
+      }
+
+      .tab-button.active {
+        background: rgba(34, 197, 94, 0.2);
+        border-color: rgba(34, 197, 94, 0.45);
+      }
+
+      .panel {
+        display: none;
+      }
+
+      .panel.active {
+        display: block;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        border: 1px solid rgba(127, 127, 127, 0.3);
+        border-radius: 14px;
+        padding: 16px;
+        background: rgba(127, 127, 127, 0.08);
+      }
+
+      .card h4 {
+        margin-top: 0;
+        margin-bottom: 10px;
+      }
+
+      .card pre,
+      pre {
+        background: rgba(127, 127, 127, 0.12);
+        padding: 12px;
+        overflow: auto;
+        border-radius: 10px;
+      }
+
+      .muted {
+        opacity: 0.75;
+      }
+
+      .small {
+        font-size: 12px;
+      }
+
+      .table-wrap {
+        overflow: auto;
+        border: 1px solid rgba(127, 127, 127, 0.2);
+        border-radius: 12px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid rgba(127, 127, 127, 0.22);
+        padding: 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: rgba(127, 127, 127, 0.12);
+        white-space: nowrap;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(127, 127, 127, 0.18);
+        margin-right: 6px;
+        margin-bottom: 4px;
+      }
+
+      .badge.ok {
+        background: rgba(34, 197, 94, 0.2);
+      }
+
+      .badge.warn {
+        background: rgba(234, 179, 8, 0.22);
+      }
+
+      .badge.danger {
+        background: rgba(220, 38, 38, 0.2);
+      }
+
+      .mono {
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          monospace;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .field {
+        display: block;
+        margin-bottom: 14px;
+      }
+
+      .field-label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+
+      .inline-field {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .two-column {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+
+      .modal {
+        width: min(760px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+        border-radius: 16px;
+        border: 1px solid rgba(127, 127, 127, 0.35);
+        background: canvas;
+        padding: 20px;
+      }
+
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .modal-header h3 {
+        margin: 0;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .code-link {
+        word-break: break-all;
+      }
     </style>
   </head>
   <body>
     <h2>Update Center 管理面板</h2>
 
-    <div class="row">
+    <div class="row topbar">
       <label>Admin Token：</label>
-      <input id="token" type="password" placeholder="Bearer Token（不会上传到服务器）" />
+      <input
+        id="token"
+        class="token-input"
+        type="password"
+        placeholder="Bearer Token（仅存浏览器 localStorage）"
+      />
       <button id="saveToken">保存</button>
-      <button id="refresh">刷新</button>
-      <label class="muted"><input id="forceDelete" type="checkbox" /> 强制删除（允许删除 stable 相关版本）</label>
+      <button id="refresh">刷新当前 TAB</button>
       <span id="status" class="muted"></span>
     </div>
 
-    <h3>当前稳定渠道</h3>
-    <pre id="stableState">(loading...)</pre>
+    <div class="tabs">
+      <button id="tabDesktop" class="tab-button" data-tab="desktop">桌面端更新</button>
+      <button id="tabBackend" class="tab-button" data-tab="backend">后端发布</button>
+    </div>
 
-    <h3>已上传的版本（releases）</h3>
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 220px">版本</th>
-          <th style="width: 160px">大小</th>
-          <th style="width: 220px">状态</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="releasesBody"></tbody>
-    </table>
+    <section id="panelDesktop" class="panel">
+      <div class="row">
+        <label class="muted"
+          ><input id="desktopForceDelete" type="checkbox" />
+          强制删除（允许删除 stable 相关版本）</label
+        >
+      </div>
+
+      <h3>当前稳定渠道</h3>
+      <pre id="stableState">(loading...)</pre>
+
+      <h3>已上传的版本（releases）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 220px">版本</th>
+              <th style="width: 120px">大小</th>
+              <th style="width: 220px">状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="releasesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="panelBackend" class="panel">
+      <div class="row">
+        <label class="muted"
+          ><input id="backendForceDelete" type="checkbox" />
+          强制删除（允许删除非当前活跃但仍受保护的后端版本）</label
+        >
+      </div>
+
+      <h3>渠道概览</h3>
+      <div class="grid">
+        <div class="card">
+          <div class="modal-header">
+            <h4>Testing</h4>
+            <button id="rollbackTesting">回滚上一版</button>
+          </div>
+          <pre id="backendTestingState">(loading...)</pre>
+        </div>
+        <div class="card">
+          <div class="modal-header">
+            <h4>Stable</h4>
+            <button id="rollbackStableBackend">回滚上一版</button>
+          </div>
+          <pre id="backendStableState">(loading...)</pre>
+        </div>
+      </div>
+
+      <h3>当前 Stable 兼容策略</h3>
+      <pre id="backendActiveCompatibility">(loading...)</pre>
+
+      <h3>后端版本</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 140px">版本</th>
+              <th>镜像产物</th>
+              <th style="width: 120px">大小</th>
+              <th style="width: 140px">渠道</th>
+              <th style="width: 120px">兼容策略</th>
+              <th style="width: 220px">状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="backendReleasesBody"></tbody>
+        </table>
+      </div>
+
+      <h3>环境</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 140px">环境</th>
+              <th style="width: 100px">渠道</th>
+              <th style="width: 120px">当前版本</th>
+              <th style="width: 120px">Pinned</th>
+              <th style="width: 140px">Desired / Resolved</th>
+              <th>Agent / 服务</th>
+              <th style="width: 180px">自动更新</th>
+              <th style="width: 120px">手工策略</th>
+              <th style="width: 180px">更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="backendEnvironmentsBody"></tbody>
+        </table>
+      </div>
+
+      <h3>部署任务</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 170px">部署 ID</th>
+              <th style="width: 140px">环境</th>
+              <th style="width: 120px">目标版本</th>
+              <th style="width: 90px">渠道</th>
+              <th style="width: 110px">状态</th>
+              <th style="width: 120px">触发方式</th>
+              <th style="width: 160px">执行方</th>
+              <th style="width: 180px">更新时间</th>
+              <th>结果</th>
+            </tr>
+          </thead>
+          <tbody id="backendDeploymentsBody"></tbody>
+        </table>
+      </div>
+    </section>
 
     <h3>日志</h3>
     <pre id="log"></pre>
 
+    <div id="modalBackdrop" class="modal-backdrop hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="modalTitle">编辑</h3>
+          <button id="modalClose" type="button">关闭</button>
+        </div>
+
+        <form id="compatibilityForm" class="hidden">
+          <label class="field">
+            <span class="field-label">后端版本</span>
+            <input id="compatibilityVersion" type="text" readonly />
+          </label>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">desktopMinVersion</span>
+              <input id="compatibilityMinVersion" type="text" placeholder="例如 0.8.0" />
+            </label>
+            <label class="field">
+              <span class="field-label">desktopRecommendedVersion</span>
+              <input id="compatibilityRecommendedVersion" type="text" placeholder="例如 0.8.4" />
+            </label>
+          </div>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">desktopMaxVersion</span>
+              <input id="compatibilityMaxVersion" type="text" placeholder="可选，例如 0.9.0" />
+            </label>
+            <label class="field">
+              <span class="field-label">enforceMode</span>
+              <select id="compatibilityEnforceMode">
+                <option value="none">none</option>
+                <option value="warn">warn</option>
+                <option value="hard_block">hard_block</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span class="field-label">notes</span>
+            <textarea id="compatibilityNotes" placeholder="兼容策略说明（可选）"></textarea>
+          </label>
+          <div class="modal-actions">
+            <button id="compatibilityCancel" type="button">取消</button>
+            <button type="submit">保存兼容策略</button>
+          </div>
+        </form>
+
+        <form id="environmentForm" class="hidden">
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">environmentId</span>
+              <input id="environmentId" type="text" readonly />
+            </label>
+            <label class="field">
+              <span class="field-label">currentVersion（只读）</span>
+              <input id="environmentCurrentVersion" type="text" readonly />
+            </label>
+          </div>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">hostRole</span>
+              <input id="environmentHostRole" type="text" placeholder="例如 arm64-production" />
+            </label>
+            <label class="field">
+              <span class="field-label">agentBaseUrl</span>
+              <input id="environmentAgentBaseUrl" type="text" placeholder="例如 http://host:3901" />
+            </label>
+          </div>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">releaseChannel</span>
+              <select id="environmentReleaseChannel">
+                <option value="stable">stable</option>
+                <option value="testing">testing</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">services（逗号分隔）</span>
+              <input
+                id="environmentServices"
+                type="text"
+                placeholder="例如 local_server, postgres, rabbitmq"
+              />
+            </label>
+          </div>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">pinnedVersion</span>
+              <input id="environmentPinnedVersion" type="text" placeholder="留空表示不固定" />
+            </label>
+            <label class="field">
+              <span class="field-label">desiredVersion</span>
+              <input id="environmentDesiredVersion" type="text" placeholder="留空表示按渠道解析" />
+            </label>
+          </div>
+          <label class="field">
+            <span class="field-label">autoUpdate.dailyWindows（每行一个 HH:mm-HH:mm）</span>
+            <textarea id="environmentDailyWindows" placeholder="例如&#10;02:00-04:00"></textarea>
+          </label>
+          <div class="inline-field">
+            <label><input id="environmentAutoUpdateEnabled" type="checkbox" /> 启用自动更新</label>
+            <label><input id="environmentAllowForce" type="checkbox" /> 允许强制执行</label>
+          </div>
+          <p id="environmentResolvedHint" class="small muted"></p>
+          <div class="modal-actions">
+            <button id="environmentCancel" type="button">取消</button>
+            <button type="submit">保存环境配置</button>
+          </div>
+        </form>
+
+        <form id="deploymentForm" class="hidden">
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">environmentId</span>
+              <input id="deploymentEnvironmentId" type="text" readonly />
+            </label>
+            <label class="field">
+              <span class="field-label">channel</span>
+              <select id="deploymentChannel">
+                <option value="stable">stable</option>
+                <option value="testing">testing</option>
+              </select>
+            </label>
+          </div>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">version（可留空）</span>
+              <input id="deploymentVersion" type="text" placeholder="留空则由服务端按环境与渠道推导" />
+            </label>
+            <label class="field">
+              <span class="field-label">triggerMode</span>
+              <select id="deploymentTriggerMode">
+                <option value="manual">manual</option>
+                <option value="auto">auto</option>
+                <option value="rescue">rescue</option>
+              </select>
+            </label>
+          </div>
+          <div class="two-column">
+            <label class="field">
+              <span class="field-label">requestedBy</span>
+              <input id="deploymentRequestedBy" type="text" value="admin-ui" />
+            </label>
+            <label class="field">
+              <span class="field-label">notes</span>
+              <input id="deploymentNotes" type="text" placeholder="可选备注" />
+            </label>
+          </div>
+          <label class="inline-field"><input id="deploymentForce" type="checkbox" /> force</label>
+          <p id="deploymentHint" class="small muted"></p>
+          <div class="modal-actions">
+            <button id="deploymentCancel" type="button">取消</button>
+            <button type="submit">创建部署任务</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script>
+      const tabs = {
+        desktop: {
+          button: document.getElementById('tabDesktop'),
+          panel: document.getElementById('panelDesktop')
+        },
+        backend: {
+          button: document.getElementById('tabBackend'),
+          panel: document.getElementById('panelBackend')
+        }
+      }
+
+      const state = {
+        activeTab: 'desktop',
+        desktop: {
+          channels: undefined,
+          releases: undefined
+        },
+        backend: {
+          channels: undefined,
+          activeCompatibility: undefined,
+          releases: undefined,
+          environments: undefined,
+          deployments: undefined
+        }
+      }
+
       const elToken = document.getElementById('token')
       const elSave = document.getElementById('saveToken')
       const elRefresh = document.getElementById('refresh')
-      const elForceDelete = document.getElementById('forceDelete')
       const elStatus = document.getElementById('status')
-      const elStable = document.getElementById('stableState')
-      const elBody = document.getElementById('releasesBody')
       const elLog = document.getElementById('log')
 
-      function log(msg) {
+      const elStableState = document.getElementById('stableState')
+      const elDesktopForceDelete = document.getElementById('desktopForceDelete')
+      const elDesktopReleasesBody = document.getElementById('releasesBody')
+
+      const elBackendForceDelete = document.getElementById('backendForceDelete')
+      const elBackendTestingState = document.getElementById('backendTestingState')
+      const elBackendStableState = document.getElementById('backendStableState')
+      const elBackendActiveCompatibility = document.getElementById('backendActiveCompatibility')
+      const elBackendReleasesBody = document.getElementById('backendReleasesBody')
+      const elBackendEnvironmentsBody = document.getElementById('backendEnvironmentsBody')
+      const elBackendDeploymentsBody = document.getElementById('backendDeploymentsBody')
+      const elRollbackTesting = document.getElementById('rollbackTesting')
+      const elRollbackStableBackend = document.getElementById('rollbackStableBackend')
+
+      const elModalBackdrop = document.getElementById('modalBackdrop')
+      const elModalTitle = document.getElementById('modalTitle')
+      const elModalClose = document.getElementById('modalClose')
+      const elCompatibilityForm = document.getElementById('compatibilityForm')
+      const elEnvironmentForm = document.getElementById('environmentForm')
+      const elDeploymentForm = document.getElementById('deploymentForm')
+
+      const elCompatibilityVersion = document.getElementById('compatibilityVersion')
+      const elCompatibilityMinVersion = document.getElementById('compatibilityMinVersion')
+      const elCompatibilityRecommendedVersion = document.getElementById('compatibilityRecommendedVersion')
+      const elCompatibilityMaxVersion = document.getElementById('compatibilityMaxVersion')
+      const elCompatibilityEnforceMode = document.getElementById('compatibilityEnforceMode')
+      const elCompatibilityNotes = document.getElementById('compatibilityNotes')
+      const elCompatibilityCancel = document.getElementById('compatibilityCancel')
+
+      const elEnvironmentId = document.getElementById('environmentId')
+      const elEnvironmentCurrentVersion = document.getElementById('environmentCurrentVersion')
+      const elEnvironmentHostRole = document.getElementById('environmentHostRole')
+      const elEnvironmentAgentBaseUrl = document.getElementById('environmentAgentBaseUrl')
+      const elEnvironmentReleaseChannel = document.getElementById('environmentReleaseChannel')
+      const elEnvironmentServices = document.getElementById('environmentServices')
+      const elEnvironmentPinnedVersion = document.getElementById('environmentPinnedVersion')
+      const elEnvironmentDesiredVersion = document.getElementById('environmentDesiredVersion')
+      const elEnvironmentDailyWindows = document.getElementById('environmentDailyWindows')
+      const elEnvironmentAutoUpdateEnabled = document.getElementById('environmentAutoUpdateEnabled')
+      const elEnvironmentAllowForce = document.getElementById('environmentAllowForce')
+      const elEnvironmentResolvedHint = document.getElementById('environmentResolvedHint')
+      const elEnvironmentCancel = document.getElementById('environmentCancel')
+
+      const elDeploymentEnvironmentId = document.getElementById('deploymentEnvironmentId')
+      const elDeploymentChannel = document.getElementById('deploymentChannel')
+      const elDeploymentVersion = document.getElementById('deploymentVersion')
+      const elDeploymentTriggerMode = document.getElementById('deploymentTriggerMode')
+      const elDeploymentRequestedBy = document.getElementById('deploymentRequestedBy')
+      const elDeploymentNotes = document.getElementById('deploymentNotes')
+      const elDeploymentForce = document.getElementById('deploymentForce')
+      const elDeploymentHint = document.getElementById('deploymentHint')
+      const elDeploymentCancel = document.getElementById('deploymentCancel')
+
+      class ApiError extends Error {
+        constructor(status, message, payload) {
+          super(message)
+          this.name = 'ApiError'
+          this.status = status
+          this.payload = payload
+        }
+      }
+
+      function log(message) {
         const time = new Date().toISOString()
-        elLog.textContent = `[${time}] ${msg}\n` + elLog.textContent
+        elLog.textContent = `[${time}] ${message}\n` + elLog.textContent
+      }
+
+      function markErrorHandled(error) {
+        if (error && typeof error === 'object') {
+          error.__adminHandled = true
+        }
+      }
+
+      function isErrorHandled(error) {
+        return !!(error && typeof error === 'object' && error.__adminHandled === true)
+      }
+
+      function handleUiError(error, label = '操作') {
+        if (isErrorHandled(error)) {
+          return
+        }
+
+        const message = error && error.message ? error.message : String(error)
+        log(`ERROR: ${label}失败：${message}`)
+        elStatus.textContent = `${label}失败`
+        alert(`${label}失败：${message}`)
+        markErrorHandled(error)
       }
 
       function getToken() {
@@ -75,146 +700,942 @@
         localStorage.setItem('UPDATE_ADMIN_TOKEN', token)
       }
 
+      function errorMessage(payload, fallback) {
+        if (typeof payload === 'string' && payload.trim()) {
+          return payload.trim()
+        }
+
+        if (payload && typeof payload === 'object') {
+          if (Array.isArray(payload.message) && payload.message.length > 0) {
+            return payload.message.join('; ')
+          }
+
+          if (typeof payload.message === 'string' && payload.message.trim()) {
+            return payload.message.trim()
+          }
+
+          try {
+            return JSON.stringify(payload)
+          } catch {
+            return fallback
+          }
+        }
+
+        return fallback
+      }
+
       async function api(path, options = {}) {
         const token = getToken()
         const headers = Object.assign(
-          { 'Content-Type': 'application/json' },
+          {},
           token ? { Authorization: `Bearer ${token}` } : {},
           options.headers || {}
         )
 
-        const res = await fetch(`/api${path}`, Object.assign({}, options, { headers }))
-        const text = await res.text()
-        let data
-        try { data = text ? JSON.parse(text) : null } catch { data = text }
-
-        if (!res.ok) {
-          throw new Error(typeof data === 'string' ? data : JSON.stringify(data))
+        if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+          headers['Content-Type'] = 'application/json'
         }
+
+        const response = await fetch(`/api${path}`, Object.assign({}, options, { headers }))
+        const text = await response.text()
+        let data = null
+
+        try {
+          data = text ? JSON.parse(text) : null
+        } catch {
+          data = text
+        }
+
+        if (!response.ok) {
+          throw new ApiError(response.status, errorMessage(data, `请求失败：${response.status}`), data)
+        }
+
         return data
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;')
       }
 
       function prettyBytes(bytes) {
         const n = Number(bytes)
         if (!Number.isFinite(n) || n <= 0) return '-'
         const units = ['B', 'KB', 'MB', 'GB', 'TB']
-        let i = 0
-        let v = n
-        while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1 }
-        return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+        let value = n
+        let index = 0
+
+        while (value >= 1024 && index < units.length - 1) {
+          value /= 1024
+          index += 1
+        }
+
+        return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`
       }
 
-      async function refresh() {
-        elStatus.textContent = '刷新中...'
+      function prettyJson(value, emptyText = '暂无数据') {
+        if (
+          value === undefined ||
+          value === null ||
+          (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)
+        ) {
+          return emptyText
+        }
+
         try {
-          const [channels, releases] = await Promise.all([api('/admin/channels'), api('/admin/releases/details')])
-          elStable.textContent = JSON.stringify(channels.stable, null, 2)
-
-          renderReleases(releases.versions || [])
-
-          elStatus.textContent = 'OK'
-        } catch (e) {
-          elStatus.textContent = '失败'
-          log(`ERROR: ${e.message || e}`)
+          return JSON.stringify(value, null, 2)
+        } catch {
+          return String(value)
         }
       }
 
-      function renderReleases(versions) {
-        elBody.innerHTML = ''
-        for (const r of versions) {
-          const v = r.version
-          const tr = document.createElement('tr')
+      function formatDateTime(value) {
+        if (!value) return '-'
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) return String(value)
+        return date.toLocaleString('zh-CN', { hour12: false })
+      }
 
-          const tdV = document.createElement('td')
-          tdV.innerHTML = `<span class="badge">${v}</span>${r.protected ? '<span class="pill danger">protected</span>' : ''}`
+      function formatChannels(channels) {
+        if (!Array.isArray(channels) || channels.length === 0) {
+          return '<span class="muted">未进入渠道</span>'
+        }
 
-          const tdSize = document.createElement('td')
-          tdSize.textContent = prettyBytes(r.sizeBytes)
+        return channels
+          .map((channel) => `<span class="badge ${channel === 'stable' ? 'ok' : 'warn'}">${escapeHtml(channel)}</span>`)
+          .join('')
+      }
 
-          const tdState = document.createElement('td')
-          if (r.protected) {
-            tdState.textContent = `受保护：${(r.protectedReasons || []).join(', ') || 'stable'}`
+      function formatProtected(protectedFlag, reasons) {
+        if (!protectedFlag) {
+          return '<span class="badge ok">可操作</span>'
+        }
+
+        const detail = Array.isArray(reasons) && reasons.length > 0 ? reasons.join(', ') : '受保护'
+        return `<span class="badge danger">${escapeHtml(detail)}</span>`
+      }
+
+      function formatAutoUpdate(autoUpdate) {
+        if (!autoUpdate || autoUpdate.enabled !== true) {
+          return '关闭'
+        }
+
+        const windows = Array.isArray(autoUpdate.dailyWindows)
+          ? autoUpdate.dailyWindows
+              .map((item) => `${item.start}-${item.end}`)
+              .filter(Boolean)
+              .join(', ')
+          : ''
+
+        return windows ? `开启：${windows}` : '开启（无时间窗）'
+      }
+
+      function formatManualPolicy(manualPolicy) {
+        return manualPolicy && manualPolicy.allowForce === false ? '禁用强制' : '允许强制'
+      }
+
+      function formatResult(result) {
+        if (result === undefined || result === null || result === '') {
+          return '-'
+        }
+
+        if (typeof result === 'string') {
+          return result
+        }
+
+        try {
+          return JSON.stringify(result)
+        } catch {
+          return String(result)
+        }
+      }
+
+      function normalizeTabFromHash() {
+        return window.location.hash === '#backend' ? 'backend' : 'desktop'
+      }
+
+      function updateTabUi(tab) {
+        Object.entries(tabs).forEach(([name, target]) => {
+          const active = name === tab
+          target.button.classList.toggle('active', active)
+          target.panel.classList.toggle('active', active)
+        })
+      }
+
+      async function activateTab(tab, options = {}) {
+        const syncHash = options.syncHash !== false
+        state.activeTab = tab === 'backend' ? 'backend' : 'desktop'
+        updateTabUi(state.activeTab)
+
+        if (syncHash) {
+          const nextHash = state.activeTab === 'backend' ? '#backend' : '#desktop'
+          if (window.location.hash !== nextHash) {
+            history.replaceState(null, '', nextHash)
+          }
+        }
+
+        await refreshActiveTab()
+      }
+
+      async function refreshActiveTab() {
+        const label = state.activeTab === 'backend' ? '后端' : '桌面端'
+        elStatus.textContent = `刷新${label}中...`
+
+        try {
+          if (state.activeTab === 'backend') {
+            await loadBackend()
           } else {
-            tdState.textContent = '可清理'
+            await loadDesktop()
           }
 
-          const tdA = document.createElement('td')
-          const btnPromote = document.createElement('button')
-          btnPromote.textContent = '发布到 stable'
-          btnPromote.onclick = async () => {
-            if (!confirm(`确认将 ${v} 发布到 stable？`)) return
-            try {
-              await api('/admin/channels/stable/promote', { method: 'POST', body: JSON.stringify({ version: v }) })
-              log(`Promoted stable to ${v}`)
-              await refresh()
-            } catch (e) {
-              log(`ERROR: ${e.message || e}`)
-            }
-          }
-
-          const btnRollback = document.createElement('button')
-          btnRollback.textContent = '回滚到此版本'
-          btnRollback.onclick = async () => {
-            if (!confirm(`确认将 stable 回滚到 ${v}？`)) return
-            try {
-              await api('/admin/channels/stable/rollback', { method: 'POST', body: JSON.stringify({ version: v }) })
-              log(`Rollback stable to ${v}`)
-              await refresh()
-            } catch (e) {
-              log(`ERROR: ${e.message || e}`)
-            }
-          }
-
-          tdA.appendChild(btnPromote)
-          tdA.appendChild(document.createTextNode(' '))
-          tdA.appendChild(btnRollback)
-
-          const btnDelete = document.createElement('button')
-          btnDelete.textContent = '删除版本'
-          btnDelete.onclick = async () => {
-            const force = !!elForceDelete.checked
-            if (r.protected && !force) {
-              alert('该版本属于 stable 受保护集合；如需删除请勾选“强制删除”')
-              return
-            }
-
-            const tip = r.protected ? `（受保护：${(r.protectedReasons || []).join(', ') || 'stable'}）` : ''
-            const msg = r.protected
-              ? `确认强制删除版本 ${v}${tip}？\n\n注意：删除 releases 会导致无法回滚到该版本（但不影响当前 /updates/stable/ 静态文件）。`
-              : `确认删除版本 ${v}？（删除 releases 目录以释放磁盘空间）`
-            if (!confirm(msg)) return
-
-            try {
-              await api(`/admin/releases/${encodeURIComponent(v)}${force ? '?force=1' : ''}`, { method: 'DELETE' })
-              log(`Deleted release ${v}${force ? ' (force)' : ''}`)
-              await refresh()
-            } catch (e) {
-              log(`ERROR: ${e.message || e}`)
-            }
-          }
-
-          tdA.appendChild(document.createTextNode(' '))
-          tdA.appendChild(btnDelete)
-
-          tr.appendChild(tdV)
-          tr.appendChild(tdSize)
-          tr.appendChild(tdState)
-          tr.appendChild(tdA)
-          elBody.appendChild(tr)
+          elStatus.textContent = `已刷新 ${label}`
+        } catch (error) {
+          elStatus.textContent = `${label}刷新失败`
+          log(`ERROR: ${label}刷新失败：${error.message || error}`)
         }
       }
 
-      elSave.onclick = () => {
-        const value = (elToken.value || '').trim()
-        setToken(value)
-        log(value ? 'Token saved' : 'Token cleared')
+      async function runAction(label, action, options = {}) {
+        elStatus.textContent = `${label}中...`
+
+        try {
+          const result = await action()
+          log(`${label}成功`)
+          elStatus.textContent = `${label}完成`
+
+          if (options.refreshDesktop) {
+            await loadDesktop()
+          }
+
+          if (options.refreshBackend) {
+            await loadBackend()
+          }
+
+          return result
+        } catch (error) {
+          const message = error.message || String(error)
+          log(`ERROR: ${label}失败：${message}`)
+          elStatus.textContent = `${label}失败`
+          markErrorHandled(error)
+          if (options.alert !== false) {
+            alert(`${label}失败：${message}`)
+          }
+          throw error
+        }
       }
 
-      elRefresh.onclick = () => refresh()
+      async function loadDesktop() {
+        const [channels, releases] = await Promise.all([
+          api('/admin/channels'),
+          api('/admin/releases/details')
+        ])
 
-      // init
+        state.desktop.channels = channels
+        state.desktop.releases = releases
+        renderDesktop()
+      }
+
+      async function loadBackend() {
+        const [channels, activeCompatibility, releases, environments, deployments] = await Promise.all([
+          api('/admin/backend-channels'),
+          api('/admin/backend-compatibility/active'),
+          api('/admin/backend-releases/details'),
+          api('/admin/backend-environments'),
+          api('/admin/backend-deployments')
+        ])
+
+        state.backend.channels = channels
+        state.backend.activeCompatibility = activeCompatibility
+        state.backend.releases = releases
+        state.backend.environments = environments
+        state.backend.deployments = deployments
+        renderBackend()
+      }
+
+      function actionButton(label, onClick, options = {}) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.textContent = label
+        button.disabled = options.disabled === true
+        button.addEventListener('click', () => {
+          Promise.resolve(onClick()).catch((error) => {
+            handleUiError(error, label)
+          })
+        })
+        return button
+      }
+
+      function emptyRow(colspan, text) {
+        const row = document.createElement('tr')
+        const cell = document.createElement('td')
+        cell.colSpan = colspan
+        cell.className = 'muted'
+        cell.textContent = text
+        row.appendChild(cell)
+        return row
+      }
+
+      function renderDesktop() {
+        const channels = state.desktop.channels || { stable: { previousVersions: [] } }
+        const releases = state.desktop.releases || { versions: [] }
+
+        elStableState.textContent = prettyJson(channels.stable, 'stable 尚未发布')
+        elDesktopReleasesBody.innerHTML = ''
+
+        for (const release of releases.versions || []) {
+          const row = document.createElement('tr')
+
+          const versionCell = document.createElement('td')
+          versionCell.innerHTML = `<span class="badge mono">${escapeHtml(release.version)}</span>`
+
+          const sizeCell = document.createElement('td')
+          sizeCell.textContent = prettyBytes(release.sizeBytes)
+
+          const stateCell = document.createElement('td')
+          stateCell.innerHTML = release.protected
+            ? `<span class="badge danger">${escapeHtml((release.protectedReasons || []).join(', ') || '受保护')}</span>`
+            : '<span class="badge ok">可清理</span>'
+
+          const actionCell = document.createElement('td')
+          const actions = document.createElement('div')
+          actions.className = 'actions'
+
+          actions.appendChild(
+            actionButton('发布到 stable', async () => {
+              if (!confirm(`确认将 ${release.version} 发布到 stable？`)) return
+              await runAction(
+                `桌面端 stable 发布 ${release.version}`,
+                () =>
+                  api('/admin/channels/stable/promote', {
+                    method: 'POST',
+                    body: JSON.stringify({ version: release.version })
+                  }),
+                { refreshDesktop: true }
+              )
+            })
+          )
+
+          actions.appendChild(
+            actionButton('回滚到此版本', async () => {
+              if (!confirm(`确认将 stable 回滚到 ${release.version}？`)) return
+              await runAction(
+                `桌面端 stable 回滚到 ${release.version}`,
+                () =>
+                  api('/admin/channels/stable/rollback', {
+                    method: 'POST',
+                    body: JSON.stringify({ version: release.version })
+                  }),
+                { refreshDesktop: true }
+              )
+            })
+          )
+
+          actions.appendChild(
+            actionButton('删除版本', async () => {
+              const force = elDesktopForceDelete.checked
+
+              if (release.protected && !force) {
+                alert('该版本属于 stable 受保护集合；如需删除请勾选“强制删除”。')
+                return
+              }
+
+              const prompt = release.protected
+                ? `确认强制删除版本 ${release.version}？这会失去回滚能力，但不会影响当前 /updates/stable/ 静态文件。`
+                : `确认删除版本 ${release.version}？`
+              if (!confirm(prompt)) return
+
+              await runAction(
+                `删除桌面端版本 ${release.version}`,
+                () =>
+                  api(
+                    `/admin/releases/${encodeURIComponent(release.version)}${force ? '?force=1' : ''}`,
+                    { method: 'DELETE' }
+                  ),
+                { refreshDesktop: true }
+              )
+            })
+          )
+
+          actionCell.appendChild(actions)
+          row.append(versionCell, sizeCell, stateCell, actionCell)
+          elDesktopReleasesBody.appendChild(row)
+        }
+
+        if ((releases.versions || []).length === 0) {
+          elDesktopReleasesBody.appendChild(emptyRow(4, '暂无桌面端版本'))
+        }
+      }
+
+      function renderBackend() {
+        const channels = state.backend.channels || {
+          testing: { previousVersions: [] },
+          stable: { previousVersions: [] }
+        }
+        const activeCompatibility = state.backend.activeCompatibility
+        const releases = (state.backend.releases && state.backend.releases.versions) || []
+        const environments = (state.backend.environments && state.backend.environments.environments) || []
+        const deployments = (state.backend.deployments && state.backend.deployments.deployments) || []
+
+        elBackendTestingState.textContent = prettyJson(channels.testing, 'testing 尚未发布')
+        elBackendStableState.textContent = prettyJson(channels.stable, 'stable 尚未发布')
+        elBackendActiveCompatibility.textContent = prettyJson(
+          activeCompatibility,
+          'stable 当前版本尚未配置兼容策略'
+        )
+
+        elRollbackTesting.disabled = !channels.testing || !(channels.testing.previousVersions || []).length
+        elRollbackStableBackend.disabled = !channels.stable || !(channels.stable.previousVersions || []).length
+
+        renderBackendReleases(releases)
+        renderBackendEnvironments(environments)
+        renderBackendDeployments(deployments)
+      }
+
+      function renderBackendReleases(releases) {
+        elBackendReleasesBody.innerHTML = ''
+
+        for (const release of releases) {
+          const row = document.createElement('tr')
+
+          const versionCell = document.createElement('td')
+          versionCell.innerHTML = `<span class="badge mono">${escapeHtml(release.version)}</span>`
+
+          const artifactCell = document.createElement('td')
+          const imageFileName = release.manifest && release.manifest.image ? release.manifest.image.fileName : ''
+          const manifestUrl = release.manifestDownloadUrl
+          const checksumsUrl = release.checksumsDownloadUrl
+
+          artifactCell.innerHTML = `
+            <div class="mono">${escapeHtml(imageFileName || '-')}</div>
+            <div class="small">
+              ${release.imageDownloadUrl ? `<a class="code-link" href="${escapeHtml(release.imageDownloadUrl)}" target="_blank" rel="noreferrer">镜像</a>` : ''}
+              ${manifestUrl ? ` ${release.imageDownloadUrl ? '·' : ''} <a class="code-link" href="${escapeHtml(manifestUrl)}" target="_blank" rel="noreferrer">manifest</a>` : ''}
+              ${checksumsUrl ? ` ${(release.imageDownloadUrl || manifestUrl) ? '·' : ''} <a class="code-link" href="${escapeHtml(checksumsUrl)}" target="_blank" rel="noreferrer">checksums</a>` : ''}
+            </div>
+          `
+
+          const sizeCell = document.createElement('td')
+          sizeCell.textContent = prettyBytes(release.sizeBytes)
+
+          const channelsCell = document.createElement('td')
+          channelsCell.innerHTML = formatChannels(release.channels)
+
+          const compatibilityCell = document.createElement('td')
+          compatibilityCell.innerHTML = release.hasCompatibility
+            ? '<span class="badge ok">已配置</span>'
+            : '<span class="badge warn">未配置</span>'
+
+          const stateCell = document.createElement('td')
+          stateCell.innerHTML = formatProtected(release.protected, release.protectedReasons)
+
+          const actionCell = document.createElement('td')
+          const actions = document.createElement('div')
+          actions.className = 'actions'
+
+          actions.appendChild(
+            actionButton('发布到 testing', async () => {
+              if (!confirm(`确认将后端版本 ${release.version} 发布到 testing？`)) return
+              await runAction(
+                `后端版本 ${release.version} 发布到 testing`,
+                () =>
+                  api('/admin/backend-channels/testing/promote', {
+                    method: 'POST',
+                    body: JSON.stringify({ version: release.version })
+                  }),
+                { refreshBackend: true }
+              )
+            })
+          )
+
+          actions.appendChild(
+            actionButton(
+              '发布到 stable',
+              async () => {
+                if (!confirm(`确认将后端版本 ${release.version} 发布到 stable？`)) return
+                await runAction(
+                  `后端版本 ${release.version} 发布到 stable`,
+                  () =>
+                    api('/admin/backend-channels/stable/promote', {
+                      method: 'POST',
+                      body: JSON.stringify({ version: release.version })
+                    }),
+                  { refreshBackend: true }
+                )
+              },
+              { disabled: !release.hasCompatibility }
+            )
+          )
+
+          actions.appendChild(
+            actionButton('编辑兼容策略', async () => {
+              await openCompatibilityModal(release.version)
+            })
+          )
+
+          actions.appendChild(
+            actionButton('删除版本', async () => {
+              const force = elBackendForceDelete.checked
+              const tip = release.protected
+                ? `\n受保护原因：${(release.protectedReasons || []).join(', ') || '受保护'}`
+                : ''
+
+              if (
+                !confirm(
+                  `确认删除后端版本 ${release.version}？${tip}\n${
+                    force ? '将按 force=1 请求删除。' : '如遇受保护版本，请先勾选上方“强制删除”。'
+                  }`
+                )
+              ) {
+                return
+              }
+
+              await runAction(
+                `删除后端版本 ${release.version}`,
+                () =>
+                  api(
+                    `/admin/backend-releases/${encodeURIComponent(release.version)}${force ? '?force=1' : ''}`,
+                    { method: 'DELETE' }
+                  ),
+                { refreshBackend: true }
+              )
+            })
+          )
+
+          actionCell.appendChild(actions)
+          row.append(versionCell, artifactCell, sizeCell, channelsCell, compatibilityCell, stateCell, actionCell)
+          elBackendReleasesBody.appendChild(row)
+        }
+
+        if (releases.length === 0) {
+          elBackendReleasesBody.appendChild(emptyRow(7, '暂无后端版本'))
+        }
+      }
+
+      function renderBackendEnvironments(environments) {
+        elBackendEnvironmentsBody.innerHTML = ''
+
+        for (const environment of environments) {
+          const row = document.createElement('tr')
+
+          const envCell = document.createElement('td')
+          envCell.innerHTML = `<span class="badge mono">${escapeHtml(environment.environmentId)}</span>`
+
+          const channelCell = document.createElement('td')
+          channelCell.innerHTML = `<span class="badge ${environment.releaseChannel === 'stable' ? 'ok' : 'warn'}">${escapeHtml(environment.releaseChannel)}</span>`
+
+          const currentCell = document.createElement('td')
+          currentCell.textContent = environment.currentVersion || '-'
+
+          const pinnedCell = document.createElement('td')
+          pinnedCell.textContent = environment.pinnedVersion || '-'
+
+          const desiredCell = document.createElement('td')
+          desiredCell.innerHTML = `
+            <div>desired: ${escapeHtml(environment.desiredVersion || '-')}</div>
+            <div class="small muted">resolved: ${escapeHtml(environment.resolvedDesiredVersion || '-')}</div>
+          `
+
+          const agentCell = document.createElement('td')
+          agentCell.innerHTML = `
+            <div>${escapeHtml(environment.agentBaseUrl || '-')}</div>
+            <div class="small muted">services: ${escapeHtml((environment.services || []).join(', ') || '-')}</div>
+          `
+
+          const autoCell = document.createElement('td')
+          autoCell.textContent = formatAutoUpdate(environment.autoUpdate)
+
+          const manualCell = document.createElement('td')
+          manualCell.textContent = formatManualPolicy(environment.manualPolicy)
+
+          const updatedCell = document.createElement('td')
+          updatedCell.innerHTML = `
+            <div>${escapeHtml(formatDateTime(environment.updatedAt))}</div>
+            <div class="small muted">${escapeHtml(environment.updatedBy || '-')}</div>
+          `
+
+          const actionCell = document.createElement('td')
+          const actions = document.createElement('div')
+          actions.className = 'actions'
+
+          actions.appendChild(
+            actionButton('编辑环境', async () => {
+              await openEnvironmentModal(environment.environmentId)
+            })
+          )
+
+          actions.appendChild(
+            actionButton('创建部署', async () => {
+              openDeploymentModal(environment)
+            })
+          )
+
+          actionCell.appendChild(actions)
+          row.append(
+            envCell,
+            channelCell,
+            currentCell,
+            pinnedCell,
+            desiredCell,
+            agentCell,
+            autoCell,
+            manualCell,
+            updatedCell,
+            actionCell
+          )
+          elBackendEnvironmentsBody.appendChild(row)
+        }
+
+        if (environments.length === 0) {
+          elBackendEnvironmentsBody.appendChild(emptyRow(10, '暂无后端环境配置'))
+        }
+      }
+
+      function renderBackendDeployments(deployments) {
+        elBackendDeploymentsBody.innerHTML = ''
+
+        for (const deployment of deployments) {
+          const row = document.createElement('tr')
+
+          const idCell = document.createElement('td')
+          idCell.innerHTML = `<span class="mono" title="${escapeHtml(deployment.deploymentId)}">${escapeHtml(
+            deployment.deploymentId.slice(0, 12)
+          )}...</span>`
+
+          const envCell = document.createElement('td')
+          envCell.textContent = deployment.environmentId || '-'
+
+          const versionCell = document.createElement('td')
+          versionCell.textContent = deployment.requestedVersion || '-'
+
+          const channelCell = document.createElement('td')
+          channelCell.innerHTML = `<span class="badge ${deployment.channel === 'stable' ? 'ok' : 'warn'}">${escapeHtml(
+            deployment.channel
+          )}</span>`
+
+          const statusCell = document.createElement('td')
+          statusCell.innerHTML = `<span class="badge ${
+            deployment.status === 'succeeded'
+              ? 'ok'
+              : deployment.status === 'failed' || deployment.status === 'blocked'
+                ? 'danger'
+                : 'warn'
+          }">${escapeHtml(deployment.status)}</span>`
+
+          const triggerCell = document.createElement('td')
+          triggerCell.textContent = deployment.triggerMode || '-'
+
+          const claimedCell = document.createElement('td')
+          claimedCell.innerHTML = `
+            <div>${escapeHtml(deployment.claimedBy || '-')}</div>
+            <div class="small muted">${escapeHtml(deployment.step || '-')}</div>
+          `
+
+          const updatedCell = document.createElement('td')
+          updatedCell.textContent = formatDateTime(deployment.updatedAt)
+
+          const resultCell = document.createElement('td')
+          resultCell.textContent = formatResult(deployment.result)
+
+          row.append(idCell, envCell, versionCell, channelCell, statusCell, triggerCell, claimedCell, updatedCell, resultCell)
+          elBackendDeploymentsBody.appendChild(row)
+        }
+
+        if (deployments.length === 0) {
+          elBackendDeploymentsBody.appendChild(emptyRow(9, '暂无部署任务'))
+        }
+      }
+
+      function openModal(title, form) {
+        elModalTitle.textContent = title
+        ;[elCompatibilityForm, elEnvironmentForm, elDeploymentForm].forEach((target) => {
+          target.classList.toggle('hidden', target !== form)
+        })
+        elModalBackdrop.classList.remove('hidden')
+      }
+
+      function closeModal() {
+        elModalBackdrop.classList.add('hidden')
+        ;[elCompatibilityForm, elEnvironmentForm, elDeploymentForm].forEach((target) => {
+          target.classList.add('hidden')
+        })
+      }
+
+      async function openCompatibilityModal(version) {
+        elCompatibilityVersion.value = version
+        elCompatibilityMinVersion.value = ''
+        elCompatibilityRecommendedVersion.value = ''
+        elCompatibilityMaxVersion.value = ''
+        elCompatibilityEnforceMode.value = 'none'
+        elCompatibilityNotes.value = ''
+
+        try {
+          const record = await api(`/admin/backend-compatibility/${encodeURIComponent(version)}`)
+          elCompatibilityMinVersion.value = record.desktopMinVersion || ''
+          elCompatibilityRecommendedVersion.value = record.desktopRecommendedVersion || ''
+          elCompatibilityMaxVersion.value = record.desktopMaxVersion || ''
+          elCompatibilityEnforceMode.value = record.enforceMode || 'none'
+          elCompatibilityNotes.value = record.notes || ''
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404) {
+            throw error
+          }
+        }
+
+        openModal(`编辑兼容策略：${version}`, elCompatibilityForm)
+      }
+
+      async function openEnvironmentModal(environmentId) {
+        const record = await api(`/admin/backend-environments/${encodeURIComponent(environmentId)}`)
+        const resolvedList = (state.backend.environments && state.backend.environments.environments) || []
+        const resolved = resolvedList.find((item) => item.environmentId === environmentId)
+
+        elEnvironmentId.value = record.environmentId || environmentId
+        elEnvironmentCurrentVersion.value = resolved && resolved.currentVersion ? resolved.currentVersion : ''
+        elEnvironmentHostRole.value = record.hostRole || ''
+        elEnvironmentAgentBaseUrl.value = record.agentBaseUrl || ''
+        elEnvironmentReleaseChannel.value = record.releaseChannel || 'stable'
+        elEnvironmentServices.value = Array.isArray(record.services) ? record.services.join(', ') : ''
+        elEnvironmentPinnedVersion.value = record.pinnedVersion || ''
+        elEnvironmentDesiredVersion.value = record.desiredVersion || ''
+        elEnvironmentDailyWindows.value = formatDailyWindows(record.autoUpdate && record.autoUpdate.dailyWindows)
+        elEnvironmentAutoUpdateEnabled.checked = !!(record.autoUpdate && record.autoUpdate.enabled)
+        elEnvironmentAllowForce.checked = !record.manualPolicy || record.manualPolicy.allowForce !== false
+        elEnvironmentResolvedHint.textContent = resolved
+          ? `resolvedDesiredVersion: ${resolved.resolvedDesiredVersion || '-'}`
+          : ''
+
+        openModal(`编辑环境：${environmentId}`, elEnvironmentForm)
+      }
+
+      function openDeploymentModal(environment) {
+        elDeploymentEnvironmentId.value = environment.environmentId || ''
+        elDeploymentChannel.value = environment.releaseChannel || 'stable'
+        elDeploymentVersion.value = ''
+        elDeploymentTriggerMode.value = 'manual'
+        elDeploymentRequestedBy.value = 'admin-ui'
+        elDeploymentNotes.value = ''
+        elDeploymentForce.checked = false
+        elDeploymentHint.textContent = `留空版本时，服务端会按 desiredVersion / pinnedVersion / ${
+          environment.releaseChannel || 'stable'
+        } 渠道当前版本解析。`
+        openModal(`创建部署：${environment.environmentId}`, elDeploymentForm)
+      }
+
+      function parseDailyWindows(text) {
+        const lines = String(text || '')
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+
+        return lines.map((line) => {
+          const matched = /^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$/.exec(line)
+          if (!matched) {
+            throw new Error(`无效时间窗：${line}`)
+          }
+
+          return {
+            start: `${matched[1]}:${matched[2]}`,
+            end: `${matched[3]}:${matched[4]}`
+          }
+        })
+      }
+
+      function formatDailyWindows(windows) {
+        if (!Array.isArray(windows) || windows.length === 0) {
+          return ''
+        }
+
+        return windows.map((item) => `${item.start}-${item.end}`).join('\n')
+      }
+
+      function parseServices(text) {
+        return String(text || '')
+          .split(/[\n,]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+      }
+
+      tabs.desktop.button.addEventListener('click', () => {
+        void activateTab('desktop')
+      })
+
+      tabs.backend.button.addEventListener('click', () => {
+        void activateTab('backend')
+      })
+
+      window.addEventListener('hashchange', () => {
+        void activateTab(normalizeTabFromHash(), { syncHash: false })
+      })
+
+      elSave.addEventListener('click', () => {
+        const token = (elToken.value || '').trim()
+        setToken(token)
+        log(token ? 'Admin token 已保存到 localStorage' : 'Admin token 已清空')
+      })
+
+      elRefresh.addEventListener('click', () => {
+        void refreshActiveTab()
+      })
+
+      elRollbackTesting.addEventListener('click', () => {
+        Promise.resolve(
+          (async () => {
+            if (!confirm('确认将 testing 回滚到上一版本？')) return
+            await runAction(
+              '后端 testing 回滚',
+              () =>
+                api('/admin/backend-channels/testing/rollback', {
+                  method: 'POST',
+                  body: JSON.stringify({})
+                }),
+              { refreshBackend: true }
+            )
+          })()
+        ).catch((error) => {
+          handleUiError(error, '后端 testing 回滚')
+        })
+      })
+
+      elRollbackStableBackend.addEventListener('click', () => {
+        Promise.resolve(
+          (async () => {
+            if (!confirm('确认将 stable 回滚到上一版本？')) return
+            await runAction(
+              '后端 stable 回滚',
+              () =>
+                api('/admin/backend-channels/stable/rollback', {
+                  method: 'POST',
+                  body: JSON.stringify({})
+                }),
+              { refreshBackend: true }
+            )
+          })()
+        ).catch((error) => {
+          handleUiError(error, '后端 stable 回滚')
+        })
+      })
+
+      elModalClose.addEventListener('click', closeModal)
+      elCompatibilityCancel.addEventListener('click', closeModal)
+      elEnvironmentCancel.addEventListener('click', closeModal)
+      elDeploymentCancel.addEventListener('click', closeModal)
+
+      elModalBackdrop.addEventListener('click', (event) => {
+        if (event.target === elModalBackdrop) {
+          closeModal()
+        }
+      })
+
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !elModalBackdrop.classList.contains('hidden')) {
+          closeModal()
+        }
+      })
+
+      elCompatibilityForm.addEventListener('submit', (event) => {
+        event.preventDefault()
+        Promise.resolve(
+          (async () => {
+            const version = (elCompatibilityVersion.value || '').trim()
+            const body = {
+              desktopMinVersion: (elCompatibilityMinVersion.value || '').trim(),
+              desktopRecommendedVersion: (elCompatibilityRecommendedVersion.value || '').trim(),
+              desktopMaxVersion: (elCompatibilityMaxVersion.value || '').trim(),
+              enforceMode: elCompatibilityEnforceMode.value,
+              notes: (elCompatibilityNotes.value || '').trim()
+            }
+
+            await runAction(
+              `保存后端版本 ${version} 的兼容策略`,
+              () =>
+                api(`/admin/backend-compatibility/${encodeURIComponent(version)}`, {
+                  method: 'PUT',
+                  body: JSON.stringify(body)
+                }),
+              { refreshBackend: true }
+            )
+            closeModal()
+          })()
+        ).catch((error) => {
+          handleUiError(error, '保存兼容策略')
+        })
+      })
+
+      elEnvironmentForm.addEventListener('submit', (event) => {
+        event.preventDefault()
+        Promise.resolve(
+          (async () => {
+            const environmentId = (elEnvironmentId.value || '').trim()
+            const body = {
+              hostRole: (elEnvironmentHostRole.value || '').trim(),
+              agentBaseUrl: (elEnvironmentAgentBaseUrl.value || '').trim(),
+              releaseChannel: elEnvironmentReleaseChannel.value,
+              pinnedVersion: (elEnvironmentPinnedVersion.value || '').trim(),
+              desiredVersion: (elEnvironmentDesiredVersion.value || '').trim(),
+              services: parseServices(elEnvironmentServices.value),
+              autoUpdate: {
+                enabled: elEnvironmentAutoUpdateEnabled.checked,
+                dailyWindows: parseDailyWindows(elEnvironmentDailyWindows.value)
+              },
+              manualPolicy: {
+                allowForce: elEnvironmentAllowForce.checked
+              }
+            }
+
+            await runAction(
+              `保存环境 ${environmentId}`,
+              () =>
+                api(`/admin/backend-environments/${encodeURIComponent(environmentId)}`, {
+                  method: 'PUT',
+                  headers: { 'x-uname-actor': 'admin-ui' },
+                  body: JSON.stringify(body)
+                }),
+              { refreshBackend: true }
+            )
+            closeModal()
+          })()
+        ).catch((error) => {
+          handleUiError(error, '保存环境')
+        })
+      })
+
+      elDeploymentForm.addEventListener('submit', (event) => {
+        event.preventDefault()
+        Promise.resolve(
+          (async () => {
+            const environmentId = (elDeploymentEnvironmentId.value || '').trim()
+            const body = {
+              environmentId,
+              channel: elDeploymentChannel.value,
+              version: (elDeploymentVersion.value || '').trim(),
+              triggerMode: elDeploymentTriggerMode.value,
+              force: elDeploymentForce.checked,
+              notes: (elDeploymentNotes.value || '').trim(),
+              requestedBy: (elDeploymentRequestedBy.value || '').trim()
+            }
+
+            await runAction(
+              `创建环境 ${environmentId} 的部署任务`,
+              () =>
+                api('/admin/backend-deployments', {
+                  method: 'POST',
+                  body: JSON.stringify(body)
+                }),
+              { refreshBackend: true }
+            )
+            closeModal()
+          })()
+        ).catch((error) => {
+          handleUiError(error, '创建部署')
+        })
+      })
+
       elToken.value = getToken()
-      refresh()
+      void activateTab(normalizeTabFromHash(), { syncHash: window.location.hash !== '#backend' })
     </script>
   </body>
 </html>
