@@ -2,13 +2,12 @@ import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { ServeStaticModule } from '@nestjs/serve-static'
 import { basename, join } from 'path'
-import { AdminModule } from './admin/admin.module'
-import { BackendReleasesModule } from './backend-releases/backend-releases.module'
 import { DownloadsModule } from './downloads/downloads.module'
+import { SubjectsModule } from './subjects/subjects.module'
 import { resolveUpdateStoragePaths } from './updates/update-paths'
 import { HealthController } from './health.controller'
 
-const { channelsDir, backendReleasesDir } = resolveUpdateStoragePaths()
+const { desktopSubject } = resolveUpdateStoragePaths()
 
 @Module({
   imports: [
@@ -39,7 +38,7 @@ const { channelsDir, backendReleasesDir } = resolveUpdateStoragePaths()
     // 更新文件（给 electron-updater 拉取 latest*.yml 与安装包）
     // 对外 URL 形态：/updates/<channel>/...
     ServeStaticModule.forRoot({
-      rootPath: channelsDir,
+      rootPath: desktopSubject.channelsDir,
       serveRoot: '/updates',
       serveStaticOptions: {
         dotfiles: 'ignore',
@@ -53,21 +52,7 @@ const { channelsDir, backendReleasesDir } = resolveUpdateStoragePaths()
         }
       }
     }),
-
-    // 后端 release 产物（给 deploy-agent 拉取 tar / checksum / manifest）
-    ServeStaticModule.forRoot({
-      rootPath: backendReleasesDir,
-      serveRoot: '/backend/releases',
-      serveStaticOptions: {
-        dotfiles: 'ignore',
-        setHeaders: (res) => {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-        }
-      }
-    }),
-
-    AdminModule,
-    BackendReleasesModule,
+    SubjectsModule,
     DownloadsModule
   ],
   controllers: [HealthController]

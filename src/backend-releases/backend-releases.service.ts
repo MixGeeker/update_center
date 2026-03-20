@@ -20,7 +20,7 @@ import {
   validateVersionSafe,
   writeJsonFile
 } from '../common/release-storage.utils'
-import { resolveUpdateStoragePaths } from '../updates/update-paths'
+import { resolveSubjectStoragePaths, type SubjectStoragePaths } from '../updates/update-paths'
 import type {
   BackendChannel,
   BackendChannelState,
@@ -35,6 +35,7 @@ import type {
   BackendMigrationPolicy,
   BackendReleaseDetail,
   BackendReleaseManifest,
+  BackendReleasesServiceOptions,
   BackendUploadSessionRecord,
   BackendUploadSlot
 } from './backend-releases.types'
@@ -104,7 +105,25 @@ type NormalizedChunkUploadOptions =
 
 @Injectable()
 export class BackendReleasesService {
-  private readonly paths = resolveUpdateStoragePaths()
+  private readonly options: BackendReleasesServiceOptions
+  private readonly paths: SubjectStoragePaths
+
+  constructor(options?: Partial<BackendReleasesServiceOptions>) {
+    this.options = {
+      subjectId: 'edge_backend',
+      displayName: 'Edge Backend',
+      serviceName: 'edge_backend',
+      artifactBasePath: '/artifacts/edge_backend/releases',
+      defaultServices: ['edge_backend'],
+      supportsCompatibility: true,
+      defaultEnvironmentId: 'mac-prod',
+      defaultEnvironmentActor: 'update_center',
+      environmentFileName: 'mac-prod.json',
+      imagePlatform: 'linux/arm64',
+      ...options
+    }
+    this.paths = resolveSubjectStoragePaths(this.options.subjectId)
+  }
 
   async createUploadSession(versionInput: string): Promise<{
     sessionId: string
@@ -117,7 +136,7 @@ export class BackendReleasesService {
 
     const releaseDir = this.getReleaseDir(version)
     if (await pathExists(releaseDir)) {
-      throw new ConflictException(`backend release already exists: ${version}`)
+      throw new ConflictException(`${this.options.subjectId} release already exists: ${version}`)
     }
 
     const sessionId = randomUUID()
@@ -136,10 +155,10 @@ export class BackendReleasesService {
       sessionId,
       version,
       uploadUrls: {
-        image: `/api/admin/backend-releases/upload-sessions/${encodeURIComponent(sessionId)}/files/image`,
-        checksums: `/api/admin/backend-releases/upload-sessions/${encodeURIComponent(sessionId)}/files/checksums`
+        image: `/api/admin/subjects/${encodeURIComponent(this.options.subjectId)}/releases/upload-sessions/${encodeURIComponent(sessionId)}/files/image`,
+        checksums: `/api/admin/subjects/${encodeURIComponent(this.options.subjectId)}/releases/upload-sessions/${encodeURIComponent(sessionId)}/files/checksums`
       },
-      finalizeUrl: `/api/admin/backend-releases/upload-sessions/${encodeURIComponent(sessionId)}/finalize`
+      finalizeUrl: `/api/admin/subjects/${encodeURIComponent(this.options.subjectId)}/releases/upload-sessions/${encodeURIComponent(sessionId)}/finalize`
     }
   }
 
@@ -392,18 +411,20 @@ export class BackendReleasesService {
     const version = session.version
     const releaseDir = this.getReleaseDir(version)
     if (await pathExists(releaseDir)) {
-      throw new ConflictException(`backend release already exists: ${version}`)
+      throw new ConflictException(`${this.options.subjectId} release already exists: ${version}`)
     }
 
     const channelHint = this.normalizeChannelHint(body?.channel)
     const compatibility = await this.normalizeCompatibility(version, body?.desktopCompatibility)
     if (channelHint === 'stable' && !compatibility) {
-      throw new BadRequestException('stable backend release requires desktop compatibility mapping')
+      throw new BadRequestException(
+        `stable ${this.options.subjectId} release requires compatibility mapping`
+      )
     }
 
     const manifest: BackendReleaseManifest = {
       schemaVersion: 1,
-      service: 'local_server',
+      service: this.options.serviceName,
       version,
       uploadedAt: new Date().toISOString(),
       channelHint,
@@ -413,7 +434,7 @@ export class BackendReleasesService {
         sizeBytes: image.sizeBytes,
         tag: this.normalizeOptionalString(body?.imageTag),
         repository: this.normalizeOptionalString(body?.imageRepository),
-        platform: 'linux/arm64'
+        platform: this.options.imagePlatform
       },
       checksums: session.files.checksums
         ? {
@@ -475,8 +496,8 @@ export class BackendReleasesService {
   }
 
   async listReleases(): Promise<{ versions: string[] }> {
-    await fs.mkdir(this.paths.backendReleasesDir, { recursive: true })
-    const entries = await fs.readdir(this.paths.backendReleasesDir, { withFileTypes: true })
+    await fs.mkdir(this.paths.releasesDir, { recursive: true })
+    const entries = await fs.readdir(this.paths.releasesDir, { withFileTypes: true })
     const versions = entries
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
@@ -515,16 +536,18 @@ export class BackendReleasesService {
     const force = options?.force === true
 
     if (protectedReasons.includes('testing current') || protectedReasons.includes('stable current')) {
-      throw new BadRequestException('cannot delete currently active backend release')
+      throw new BadRequestException(`cannot delete currently active ${this.options.subjectId} release`)
     }
 
     if (protectedReasons.length > 0 && !force) {
-      throw new BadRequestException(`backend release is protected: ${protectedReasons.join(', ')}`)
+      throw new BadRequestException(
+        `${this.options.subjectId} release is protected: ${protectedReasons.join(', ')}`
+      )
     }
 
     const releaseDir = this.getReleaseDir(version)
     if (!(await pathExists(releaseDir))) {
-      throw new NotFoundException(`backend release not found: ${version}`)
+      throw new NotFoundException(`${this.options.subjectId} release not found: ${version}`)
     }
 
     await fs.rm(releaseDir, { recursive: true, force: true })
@@ -554,11 +577,17 @@ export class BackendReleasesService {
 
     const releaseDir = this.getReleaseDir(version)
     if (!(await pathExists(releaseDir))) {
-      throw new NotFoundException(`backend release not found: ${version}`)
+      throw new NotFoundException(`${this.options.subjectId} release not found: ${version}`)
     }
 
-    if (channel === 'stable' && !(await pathExists(this.getCompatibilityFile(version)))) {
-      throw new BadRequestException('stable backend release requires desktop compatibility mapping')
+    if (
+      this.options.supportsCompatibility &&
+      channel === 'stable' &&
+      !(await pathExists(this.getCompatibilityFile(version)))
+    ) {
+      throw new BadRequestException(
+        `stable ${this.options.subjectId} release requires compatibility mapping`
+      )
     }
 
     const previousState = await this.readChannelState(channel)
@@ -597,24 +626,25 @@ export class BackendReleasesService {
     const state = await this.readChannelState(channel)
     const target = state.previousVersions?.[0]
     if (!target) {
-      throw new BadRequestException(`no previous backend ${channel} version to rollback`)
+      throw new BadRequestException(`no previous ${this.options.subjectId} ${channel} version to rollback`)
     }
 
     return this.promoteChannel(channel, target)
   }
 
   async upsertCompatibility(versionInput: string, input: unknown): Promise<BackendCompatibilityPolicy> {
+    this.assertCompatibilitySupported()
     const version = normalizeVersion(versionInput)
     validateVersionSafe(version)
 
     const releaseDir = this.getReleaseDir(version)
     if (!(await pathExists(releaseDir))) {
-      throw new NotFoundException(`backend release not found: ${version}`)
+      throw new NotFoundException(`${this.options.subjectId} release not found: ${version}`)
     }
 
     const compatibility = await this.normalizeCompatibility(version, input)
     if (!compatibility) {
-      throw new BadRequestException('desktop compatibility is required')
+      throw new BadRequestException(`${this.options.subjectId} compatibility is required`)
     }
 
     await this.writeCompatibility(compatibility)
@@ -622,12 +652,13 @@ export class BackendReleasesService {
   }
 
   async getCompatibility(versionInput: string): Promise<BackendCompatibilityPolicy> {
+    this.assertCompatibilitySupported()
     const version = normalizeVersion(versionInput)
     validateVersionSafe(version)
 
     const compatibility = await readJsonFile<BackendCompatibilityPolicy>(this.getCompatibilityFile(version))
     if (!compatibility) {
-      throw new NotFoundException(`backend compatibility not found: ${version}`)
+      throw new NotFoundException(`${this.options.subjectId} compatibility not found: ${version}`)
     }
 
     return compatibility
@@ -637,6 +668,7 @@ export class BackendReleasesService {
     stableCurrentVersion?: string
     compatibility?: BackendCompatibilityPolicy
   }> {
+    this.assertCompatibilitySupported()
     const stable = await this.readChannelState('stable')
     if (!stable.currentVersion) {
       return {}
@@ -651,7 +683,8 @@ export class BackendReleasesService {
   }
 
   async createDeployment(body: CreateDeploymentBody | undefined): Promise<BackendDeploymentRecord> {
-    const environmentId = this.normalizeOptionalString(body?.environmentId) || 'mac-prod'
+    const environmentId =
+      this.normalizeOptionalString(body?.environmentId) || this.options.defaultEnvironmentId
     const environment = await this.getOrCreateEnvironment(environmentId)
     const channel = normalizeBackendChannel(
       this.normalizeOptionalString(body?.channel) || environment.releaseChannel || 'stable'
@@ -664,12 +697,14 @@ export class BackendReleasesService {
     validateVersionSafe(requestedVersion)
 
     if (!(await pathExists(this.getReleaseDir(requestedVersion)))) {
-      throw new NotFoundException(`backend release not found: ${requestedVersion}`)
+      throw new NotFoundException(`${this.options.subjectId} release not found: ${requestedVersion}`)
     }
 
     const deploymentId = randomUUID()
     const now = new Date().toISOString()
-    const compatibility = await readJsonFile<BackendCompatibilityPolicy>(this.getCompatibilityFile(requestedVersion))
+    const compatibility = this.options.supportsCompatibility
+      ? await readJsonFile<BackendCompatibilityPolicy>(this.getCompatibilityFile(requestedVersion))
+      : undefined
     const record: BackendDeploymentRecord = {
       schemaVersion: 1,
       deploymentId,
@@ -706,8 +741,8 @@ export class BackendReleasesService {
   }
 
   async listDeployments(): Promise<{ deployments: BackendDeploymentRecord[] }> {
-    await fs.mkdir(this.paths.backendDeploymentsDir, { recursive: true })
-    const entries = await fs.readdir(this.paths.backendDeploymentsDir, { withFileTypes: true })
+    await fs.mkdir(this.paths.deploymentsDir, { recursive: true })
+    const entries = await fs.readdir(this.paths.deploymentsDir, { withFileTypes: true })
     const deployments: BackendDeploymentRecord[] = []
 
     for (const entry of entries) {
@@ -715,7 +750,7 @@ export class BackendReleasesService {
         continue
       }
 
-      const record = await readJsonFile<BackendDeploymentRecord>(join(this.paths.backendDeploymentsDir, entry.name))
+      const record = await readJsonFile<BackendDeploymentRecord>(join(this.paths.deploymentsDir, entry.name))
       if (record) {
         deployments.push(this.normalizeDeploymentRecord(record, entry.name.slice(0, -'.json'.length)))
       }
@@ -729,7 +764,7 @@ export class BackendReleasesService {
     const deploymentId = sanitizeFileName(deploymentIdInput, 'deploymentId')
     const record = await readJsonFile<BackendDeploymentRecord>(this.getDeploymentFile(deploymentId))
     if (!record) {
-      throw new NotFoundException(`backend deployment not found: ${deploymentId}`)
+      throw new NotFoundException(`${this.options.subjectId} deployment not found: ${deploymentId}`)
     }
     return this.normalizeDeploymentRecord(record, deploymentId)
   }
@@ -797,9 +832,34 @@ export class BackendReleasesService {
     return nextRecord
   }
 
+  async getNextDeployment(environmentIdInput: string): Promise<BackendDeploymentRecord | undefined> {
+    const environmentId = sanitizeFileName(environmentIdInput, 'environmentId')
+    const { deployments } = await this.listDeployments()
+    return deployments
+      .filter((item) => item.environmentId === environmentId && item.status === 'pending')
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
+  }
+
+  async claimDeployment(
+    deploymentIdInput: string,
+    body?: { claimedBy?: unknown }
+  ): Promise<BackendDeploymentRecord> {
+    const current = await this.getDeployment(deploymentIdInput)
+    if (current.status !== 'pending' && current.status !== 'claimed') {
+      throw new ConflictException(
+        `${this.options.subjectId} deployment cannot be claimed from status ${current.status}`
+      )
+    }
+
+    return this.updateDeployment(current.deploymentId, {
+      status: 'claimed',
+      claimedBy: this.normalizeOptionalString(body?.claimedBy) || current.claimedBy
+    })
+  }
+
   async listEnvironments(): Promise<{ environments: BackendEnvironmentResolvedRecord[] }> {
-    await fs.mkdir(this.paths.backendEnvironmentsDir, { recursive: true })
-    const entries = await fs.readdir(this.paths.backendEnvironmentsDir, { withFileTypes: true })
+    await fs.mkdir(this.paths.environmentsDir, { recursive: true })
+    const entries = await fs.readdir(this.paths.environmentsDir, { withFileTypes: true })
     const environments: BackendEnvironmentResolvedRecord[] = []
 
     for (const entry of entries) {
@@ -818,7 +878,7 @@ export class BackendReleasesService {
   async getEnvironment(environmentIdInput: string): Promise<BackendEnvironmentRecord> {
     const environment = await this.readEnvironment(environmentIdInput)
     if (!environment) {
-      throw new NotFoundException(`backend environment not found: ${environmentIdInput}`)
+      throw new NotFoundException(`${this.options.subjectId} environment not found: ${environmentIdInput}`)
     }
     return environment
   }
@@ -880,10 +940,16 @@ export class BackendReleasesService {
     return this.getResolvedEnvironment(nextEnvironment.environmentId)
   }
 
+  private assertCompatibilitySupported(): void {
+    if (!this.options.supportsCompatibility) {
+      throw new BadRequestException(`${this.options.subjectId} does not support compatibility`)
+    }
+  }
+
   private normalizeUploadSlot(slotInput: string): BackendUploadSlot {
     const slot = slotInput.trim().toLowerCase()
     if (slot !== 'image' && slot !== 'checksums') {
-      throw new BadRequestException('invalid backend upload slot')
+      throw new BadRequestException(`invalid ${this.options.subjectId} upload slot`)
     }
     return slot
   }
@@ -926,7 +992,7 @@ export class BackendReleasesService {
   private async readSession(sessionId: string): Promise<BackendUploadSessionRecord> {
     const session = await readJsonFile<BackendUploadSessionRecord>(this.getSessionFile(sessionId))
     if (!session) {
-      throw new NotFoundException(`backend upload session not found: ${sessionId}`)
+      throw new NotFoundException(`${this.options.subjectId} upload session not found: ${sessionId}`)
     }
     return session
   }
@@ -936,19 +1002,19 @@ export class BackendReleasesService {
   }
 
   private getSessionFile(sessionId: string): string {
-    return join(this.paths.backendUploadSessionsDir, `${sanitizeFileName(sessionId, 'sessionId')}.json`)
+    return join(this.paths.uploadSessionsDir, `${sanitizeFileName(sessionId, 'sessionId')}.json`)
   }
 
   private getSessionDir(sessionId: string): string {
-    return join(this.paths.backendUploadSessionsDir, sanitizeFileName(sessionId, 'sessionId'))
+    return join(this.paths.uploadSessionsDir, sanitizeFileName(sessionId, 'sessionId'))
   }
 
   private getDeploymentFile(deploymentId: string): string {
-    return join(this.paths.backendDeploymentsDir, `${sanitizeFileName(deploymentId, 'deploymentId')}.json`)
+    return join(this.paths.deploymentsDir, `${sanitizeFileName(deploymentId, 'deploymentId')}.json`)
   }
 
   private getEnvironmentFile(environmentId: string): string {
-    return join(this.paths.backendEnvironmentsDir, `${sanitizeFileName(environmentId, 'environmentId')}.json`)
+    return join(this.paths.environmentsDir, `${sanitizeFileName(environmentId, 'environmentId')}.json`)
   }
 
   private async cleanupSession(sessionId: string): Promise<void> {
@@ -1000,19 +1066,19 @@ export class BackendReleasesService {
   }
 
   private getReleaseDir(version: string): string {
-    return join(this.paths.backendReleasesDir, version)
+    return join(this.paths.releasesDir, version)
   }
 
   private getChannelDir(channel: BackendChannel): string {
-    return channel === 'testing' ? this.paths.backendTestingDir : this.paths.backendStableDir
+    return channel === 'testing' ? this.paths.testingDir : this.paths.stableDir
   }
 
   private getChannelStateFile(channel: BackendChannel): string {
-    return channel === 'testing' ? this.paths.backendTestingStateFile : this.paths.backendStableStateFile
+    return channel === 'testing' ? this.paths.testingStateFile : this.paths.stableStateFile
   }
 
   private getCompatibilityFile(version: string): string {
-    return join(this.paths.backendCompatibilityDir, `${version}.json`)
+    return join(this.paths.compatibilityDir, `${version}.json`)
   }
 
   private async readChannelState(channel: BackendChannel): Promise<BackendChannelState> {
@@ -1070,7 +1136,7 @@ export class BackendReleasesService {
   ): Promise<BackendReleaseDetail> {
     const releaseDir = this.getReleaseDir(version)
     if (!(await pathExists(releaseDir))) {
-      throw new NotFoundException(`backend release not found: ${version}`)
+      throw new NotFoundException(`${this.options.subjectId} release not found: ${version}`)
     }
 
     const stats = await getDirectoryStats(releaseDir)
@@ -1086,16 +1152,16 @@ export class BackendReleasesService {
     const protectedReasons = this.getProtectedReasons(normalizeVersion(version), testing, stable)
 
     const imageDownloadUrl = manifest?.image?.fileName
-      ? this.buildBackendArtifactUrl(version, manifest.image.fileName)
+      ? this.buildArtifactUrl(version, manifest.image.fileName)
       : undefined
-    const manifestDownloadUrl = manifest ? this.buildBackendArtifactUrl(version, 'release-manifest.json') : undefined
+    const manifestDownloadUrl = manifest ? this.buildArtifactUrl(version, 'release-manifest.json') : undefined
     const checksumsFileName = manifest?.checksums?.fileName
       ? manifest.checksums.fileName
       : (await pathExists(join(releaseDir, 'checksums.txt')))
         ? 'checksums.txt'
         : undefined
     const checksumsDownloadUrl = checksumsFileName
-      ? this.buildBackendArtifactUrl(version, checksumsFileName)
+      ? this.buildArtifactUrl(version, checksumsFileName)
       : undefined
 
     return {
@@ -1106,8 +1172,10 @@ export class BackendReleasesService {
       channels,
       protected: protectedReasons.length > 0,
       protectedReasons,
-      hasCompatibility: await pathExists(this.getCompatibilityFile(version)),
-      artifactBasePath: `/backend/releases/${encodeURIComponent(version)}`,
+      hasCompatibility: this.options.supportsCompatibility
+        ? await pathExists(this.getCompatibilityFile(version))
+        : false,
+      artifactBasePath: `${this.options.artifactBasePath}/${encodeURIComponent(version)}`,
       downloadUrl: imageDownloadUrl,
       imageDownloadUrl,
       manifestDownloadUrl,
@@ -1136,7 +1204,7 @@ export class BackendReleasesService {
       hostRole: environmentId,
       agentBaseUrl: undefined,
       releaseChannel: 'stable',
-      services: ['local_server'],
+      services: [...this.options.defaultServices],
       autoUpdate: {
         enabled: false,
         dailyWindows: []
@@ -1164,7 +1232,7 @@ export class BackendReleasesService {
       pinnedVersion: this.normalizeOptionalVersionField(input.pinnedVersion, 'pinnedVersion'),
       currentVersion: this.normalizeOptionalVersionField(input.currentVersion, 'currentVersion'),
       desiredVersion: this.normalizeOptionalVersionField(input.desiredVersion, 'desiredVersion'),
-      services: this.normalizeServiceList(input.services, ['local_server']),
+      services: this.normalizeServiceList(input.services, this.options.defaultServices),
       autoUpdate: this.normalizeAutoUpdatePolicy(input.autoUpdate),
       manualPolicy: this.normalizeManualPolicy(input.manualPolicy),
       updatedAt: this.normalizeOptionalString(input.updatedAt) || new Date().toISOString(),
@@ -1179,7 +1247,8 @@ export class BackendReleasesService {
     return {
       schemaVersion: 1,
       deploymentId: sanitizeFileName(input.deploymentId || fallbackDeploymentId, 'deploymentId'),
-      environmentId: this.normalizeOptionalString(input.environmentId) || 'mac-prod',
+      environmentId:
+        this.normalizeOptionalString(input.environmentId) || this.options.defaultEnvironmentId,
       channel: input.channel === 'testing' ? 'testing' : 'stable',
       requestedVersion: this.normalizeRequiredVersion(input.requestedVersion, 'requestedVersion'),
       status: this.normalizePersistedDeploymentStatus(input.status),
@@ -1214,8 +1283,8 @@ export class BackendReleasesService {
     await writeJsonFile(this.getEnvironmentFile(environment.environmentId), environment)
   }
 
-  private buildBackendArtifactUrl(version: string, fileName: string): string {
-    return `/backend/releases/${encodeURIComponent(version)}/${encodeURIComponent(fileName)}`
+  private buildArtifactUrl(version: string, fileName: string): string {
+    return `${this.options.artifactBasePath}/${encodeURIComponent(version)}/${encodeURIComponent(fileName)}`
   }
 
   private normalizeTriggerMode(input: unknown): BackendDeploymentTriggerMode {
@@ -1240,7 +1309,7 @@ export class BackendReleasesService {
       return value
     }
 
-    throw new BadRequestException('invalid backend deployment status')
+    throw new BadRequestException(`invalid ${this.options.subjectId} deployment status`)
   }
 
   private normalizePersistedDeploymentStatus(input: unknown): BackendDeploymentStatus {
@@ -1364,7 +1433,7 @@ export class BackendReleasesService {
       return value
     }
 
-    throw new BadRequestException('invalid backend channel hint')
+    throw new BadRequestException(`invalid ${this.options.subjectId} channel hint`)
   }
 
   private normalizeProfileSet(input: unknown): string[] {
@@ -1410,13 +1479,17 @@ export class BackendReleasesService {
       return value
     }
 
-    throw new BadRequestException('invalid desktop compatibility enforceMode')
+    throw new BadRequestException(`invalid ${this.options.subjectId} compatibility enforceMode`)
   }
 
   private async normalizeCompatibility(
     version: string,
     input: unknown
   ): Promise<BackendCompatibilityPolicy | undefined> {
+    if (!this.options.supportsCompatibility) {
+      return undefined
+    }
+
     if (!input || typeof input !== 'object') {
       return undefined
     }
@@ -1462,11 +1535,13 @@ export class BackendReleasesService {
   }
 
   private async desktopReleaseExists(version: string): Promise<boolean> {
-    if (await pathExists(join(this.paths.releasesDir, version))) {
+    const desktopPaths = resolveSubjectStoragePaths('desktop_app')
+
+    if (await pathExists(join(desktopPaths.releasesDir, version))) {
       return true
     }
 
-    const stableState = await readJsonFile<{ currentVersion?: string }>(this.paths.stableStateFile)
+    const stableState = await readJsonFile<{ currentVersion?: string }>(desktopPaths.stableStateFile)
     return normalizeVersion(stableState?.currentVersion || '') === version
   }
 
@@ -1477,7 +1552,7 @@ export class BackendReleasesService {
   private async copySessionFileToRelease(sessionId: string, storedFileName: string, targetPath: string): Promise<void> {
     const sourcePath = join(this.getSessionDir(sessionId), storedFileName)
     if (!(await pathExists(sourcePath))) {
-      throw new NotFoundException(`uploaded backend artifact not found: ${storedFileName}`)
+      throw new NotFoundException(`uploaded ${this.options.subjectId} artifact not found: ${storedFileName}`)
     }
 
     await fs.copyFile(sourcePath, targetPath)

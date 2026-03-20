@@ -35,10 +35,10 @@ type NormalizedChunkUploadOptions =
 
 @Injectable()
 export class AdminService {
-  private readonly paths = resolveUpdateStoragePaths()
+  private readonly desktopPaths = resolveUpdateStoragePaths().desktopSubject
 
   private async readStableState(): Promise<StableChannelState> {
-    const parsed = await readJsonFile<Partial<StableChannelState>>(this.paths.stableStateFile)
+    const parsed = await readJsonFile<Partial<StableChannelState>>(this.desktopPaths.stableStateFile)
     if (!parsed) {
       return { previousVersions: [] }
     }
@@ -51,7 +51,7 @@ export class AdminService {
   }
 
   private async writeStableState(state: StableChannelState): Promise<void> {
-    await writeJsonFile(this.paths.stableStateFile, state)
+    await writeJsonFile(this.desktopPaths.stableStateFile, state)
   }
 
   async createUploadSession(versionInput: string): Promise<{
@@ -78,8 +78,8 @@ export class AdminService {
     return {
       sessionId,
       version,
-      uploadUrl: `/api/admin/releases/upload-sessions/${encodeURIComponent(sessionId)}/files`,
-      finalizeUrl: `/api/admin/releases/upload-sessions/${encodeURIComponent(sessionId)}/finalize`
+      uploadUrl: `/api/admin/subjects/desktop_app/releases/upload-sessions/${encodeURIComponent(sessionId)}/files/artifact`,
+      finalizeUrl: `/api/admin/subjects/desktop_app/releases/upload-sessions/${encodeURIComponent(sessionId)}/finalize`
     }
   }
 
@@ -113,7 +113,7 @@ export class AdminService {
     uploadedFiles: string[]
   }> {
     const session = await this.readSession(sessionId)
-    const releaseDir = join(this.paths.releasesDir, session.version)
+    const releaseDir = join(this.desktopPaths.releasesDir, session.version)
     const uploadedFiles = Object.values(session.files)
 
     if (uploadedFiles.length === 0) {
@@ -341,9 +341,9 @@ export class AdminService {
   }
 
   async listReleases(): Promise<{ versions: string[] }> {
-    await fs.mkdir(this.paths.releasesDir, { recursive: true })
+    await fs.mkdir(this.desktopPaths.releasesDir, { recursive: true })
 
-    const entries = await fs.readdir(this.paths.releasesDir, { withFileTypes: true })
+    const entries = await fs.readdir(this.desktopPaths.releasesDir, { withFileTypes: true })
     const versions = entries
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
@@ -355,8 +355,8 @@ export class AdminService {
   async listReleaseDetails(): Promise<{ stable: StableChannelState; versions: ReleaseDetail[] }> {
     const stable = await this.readStableState()
 
-    await fs.mkdir(this.paths.releasesDir, { recursive: true })
-    const entries = await fs.readdir(this.paths.releasesDir, { withFileTypes: true })
+    await fs.mkdir(this.desktopPaths.releasesDir, { recursive: true })
+    const entries = await fs.readdir(this.desktopPaths.releasesDir, { withFileTypes: true })
 
     const versions = entries
       .filter((e) => e.isDirectory())
@@ -373,7 +373,7 @@ export class AdminService {
     const details: ReleaseDetail[] = []
     for (const v of versions) {
       const normalized = normalizeVersion(v)
-      const dir = join(this.paths.releasesDir, v)
+      const dir = join(this.desktopPaths.releasesDir, v)
       const stats = await getDirectoryStats(dir)
 
       const protectedReasons: string[] = []
@@ -414,7 +414,7 @@ export class AdminService {
       throw new BadRequestException(`release is protected: ${protectedReasons.join(', ')}`)
     }
 
-    const dir = join(this.paths.releasesDir, version)
+    const dir = join(this.desktopPaths.releasesDir, version)
     if (!(await pathExists(dir))) {
       throw new NotFoundException(`release not found: ${version}`)
     }
@@ -442,7 +442,7 @@ export class AdminService {
     const version = normalizeVersion(versionInput)
     validateVersionSafe(version)
 
-    const releaseDir = join(this.paths.releasesDir, version)
+    const releaseDir = join(this.desktopPaths.releasesDir, version)
     if (!(await pathExists(releaseDir))) {
       throw new NotFoundException(`release not found: ${version}`)
     }
@@ -464,21 +464,21 @@ export class AdminService {
     nextPrevious = nextPrevious.slice(0, 20)
 
     // 清空并重建 stable 目录
-    await fs.rm(this.paths.stableDir, { recursive: true, force: true })
-    await fs.mkdir(this.paths.stableDir, { recursive: true })
+    await fs.rm(this.desktopPaths.stableDir, { recursive: true, force: true })
+    await fs.mkdir(this.desktopPaths.stableDir, { recursive: true })
 
     // 将 releases/<version> 的产物“硬链接/复制”到 channels/stable
-    await copyOrLinkDirectory(releaseDir, this.paths.stableDir)
+    await copyOrLinkDirectory(releaseDir, this.desktopPaths.stableDir)
 
     // 为差分更新保留历史 blockmap（仅保留体积小的 *.blockmap，不保留旧安装包）
     for (const v of nextPrevious) {
       const vNormalized = normalizeVersion(v)
       if (!vNormalized) continue
 
-      const dir = join(this.paths.releasesDir, vNormalized)
+      const dir = join(this.desktopPaths.releasesDir, vNormalized)
       if (!(await pathExists(dir))) continue
 
-      await copyOrLinkBlockmaps(dir, this.paths.stableDir)
+      await copyOrLinkBlockmaps(dir, this.desktopPaths.stableDir)
     }
 
     const nextState: StableChannelState = {
@@ -558,11 +558,11 @@ export class AdminService {
   }
 
   private getSessionFile(sessionId: string): string {
-    return join(this.paths.desktopUploadSessionsDir, `${sanitizeFileName(sessionId, 'sessionId')}.json`)
+    return join(this.desktopPaths.uploadSessionsDir, `${sanitizeFileName(sessionId, 'sessionId')}.json`)
   }
 
   private getSessionDir(sessionId: string): string {
-    return join(this.paths.desktopUploadSessionsDir, sanitizeFileName(sessionId, 'sessionId'))
+    return join(this.desktopPaths.uploadSessionsDir, sanitizeFileName(sessionId, 'sessionId'))
   }
 
   private async cleanupSession(sessionId: string): Promise<void> {

@@ -289,9 +289,12 @@
       <span id="status" class="muted"></span>
     </div>
 
+    <h3>平台对象总览</h3>
+    <pre id="subjectsOverview">(loading...)</pre>
+
     <div class="tabs">
       <button id="tabDesktop" class="tab-button" data-tab="desktop">桌面端更新</button>
-      <button id="tabBackend" class="tab-button" data-tab="backend">后端发布</button>
+      <button id="tabBackend" class="tab-button" data-tab="backend">Edge Backend</button>
     </div>
 
     <section id="panelDesktop" class="panel">
@@ -325,7 +328,7 @@
       <div class="row">
         <label class="muted"
           ><input id="backendForceDelete" type="checkbox" />
-          强制删除（允许删除非当前活跃但仍受保护的后端版本）</label
+          强制删除（允许删除非当前活跃但仍受保护的 Edge Backend 版本）</label
         >
       </div>
 
@@ -350,7 +353,7 @@
       <h3>当前 Stable 兼容策略</h3>
       <pre id="backendActiveCompatibility">(loading...)</pre>
 
-      <h3>后端版本</h3>
+      <h3>Edge Backend 版本</h3>
       <div class="table-wrap">
         <table>
           <thead>
@@ -422,7 +425,7 @@
 
         <form id="compatibilityForm" class="hidden">
           <label class="field">
-            <span class="field-label">后端版本</span>
+            <span class="field-label">Edge Backend 版本</span>
             <input id="compatibilityVersion" type="text" readonly />
           </label>
           <div class="two-column">
@@ -584,6 +587,7 @@
 
       const state = {
         activeTab: 'desktop',
+        subjects: undefined,
         desktop: {
           channels: undefined,
           releases: undefined
@@ -602,6 +606,7 @@
       const elRefresh = document.getElementById('refresh')
       const elStatus = document.getElementById('status')
       const elLog = document.getElementById('log')
+      const elSubjectsOverview = document.getElementById('subjectsOverview')
 
       const elStableState = document.getElementById('stableState')
       const elDesktopForceDelete = document.getElementById('desktopForceDelete')
@@ -882,10 +887,12 @@
       }
 
       async function refreshActiveTab() {
-        const label = state.activeTab === 'backend' ? '后端' : '桌面端'
+        const label = state.activeTab === 'backend' ? 'Edge Backend' : '桌面端'
         elStatus.textContent = `刷新${label}中...`
 
         try {
+          await loadSubjectsOverview()
+
           if (state.activeTab === 'backend') {
             await loadBackend()
           } else {
@@ -930,8 +937,8 @@
 
       async function loadDesktop() {
         const [channels, releases] = await Promise.all([
-          api('/admin/channels'),
-          api('/admin/releases/details')
+          api('/admin/subjects/desktop_app/channels'),
+          api('/admin/subjects/desktop_app/releases/details')
         ])
 
         state.desktop.channels = channels
@@ -939,13 +946,19 @@
         renderDesktop()
       }
 
+      async function loadSubjectsOverview() {
+        const payload = await api('/admin/subjects')
+        state.subjects = payload
+        elSubjectsOverview.textContent = prettyJson(payload, '暂无平台对象')
+      }
+
       async function loadBackend() {
         const [channels, activeCompatibility, releases, environments, deployments] = await Promise.all([
-          api('/admin/backend-channels'),
-          api('/admin/backend-compatibility/active'),
-          api('/admin/backend-releases/details'),
-          api('/admin/backend-environments'),
-          api('/admin/backend-deployments')
+          api('/admin/subjects/edge_backend/channels'),
+          api('/admin/subjects/edge_backend/compatibility/active'),
+          api('/admin/subjects/edge_backend/releases/details'),
+          api('/admin/subjects/edge_backend/environments'),
+          api('/admin/subjects/edge_backend/deployments')
         ])
 
         state.backend.channels = channels
@@ -1010,7 +1023,7 @@
               await runAction(
                 `桌面端 stable 发布 ${release.version}`,
                 () =>
-                  api('/admin/channels/stable/promote', {
+                  api('/admin/subjects/desktop_app/channels/stable/promote', {
                     method: 'POST',
                     body: JSON.stringify({ version: release.version })
                   }),
@@ -1025,7 +1038,7 @@
               await runAction(
                 `桌面端 stable 回滚到 ${release.version}`,
                 () =>
-                  api('/admin/channels/stable/rollback', {
+                  api('/admin/subjects/desktop_app/channels/stable/rollback', {
                     method: 'POST',
                     body: JSON.stringify({ version: release.version })
                   }),
@@ -1052,7 +1065,7 @@
                 `删除桌面端版本 ${release.version}`,
                 () =>
                   api(
-                    `/admin/releases/${encodeURIComponent(release.version)}${force ? '?force=1' : ''}`,
+                    `/admin/subjects/desktop_app/releases/${encodeURIComponent(release.version)}${force ? '?force=1' : ''}`,
                     { method: 'DELETE' }
                   ),
                 { refreshDesktop: true }
@@ -1138,11 +1151,11 @@
 
           actions.appendChild(
             actionButton('发布到 testing', async () => {
-              if (!confirm(`确认将后端版本 ${release.version} 发布到 testing？`)) return
+              if (!confirm(`确认将 Edge Backend 版本 ${release.version} 发布到 testing？`)) return
               await runAction(
-                `后端版本 ${release.version} 发布到 testing`,
+                `Edge Backend 版本 ${release.version} 发布到 testing`,
                 () =>
-                  api('/admin/backend-channels/testing/promote', {
+                  api('/admin/subjects/edge_backend/channels/testing/promote', {
                     method: 'POST',
                     body: JSON.stringify({ version: release.version })
                   }),
@@ -1155,11 +1168,11 @@
             actionButton(
               '发布到 stable',
               async () => {
-                if (!confirm(`确认将后端版本 ${release.version} 发布到 stable？`)) return
+                if (!confirm(`确认将 Edge Backend 版本 ${release.version} 发布到 stable？`)) return
                 await runAction(
-                  `后端版本 ${release.version} 发布到 stable`,
+                  `Edge Backend 版本 ${release.version} 发布到 stable`,
                   () =>
-                    api('/admin/backend-channels/stable/promote', {
+                    api('/admin/subjects/edge_backend/channels/stable/promote', {
                       method: 'POST',
                       body: JSON.stringify({ version: release.version })
                     }),
@@ -1185,7 +1198,7 @@
 
               if (
                 !confirm(
-                  `确认删除后端版本 ${release.version}？${tip}\n${
+                  `确认删除 Edge Backend 版本 ${release.version}？${tip}\n${
                     force ? '将按 force=1 请求删除。' : '如遇受保护版本，请先勾选上方“强制删除”。'
                   }`
                 )
@@ -1194,10 +1207,10 @@
               }
 
               await runAction(
-                `删除后端版本 ${release.version}`,
+                `删除 Edge Backend 版本 ${release.version}`,
                 () =>
                   api(
-                    `/admin/backend-releases/${encodeURIComponent(release.version)}${force ? '?force=1' : ''}`,
+                    `/admin/subjects/edge_backend/releases/${encodeURIComponent(release.version)}${force ? '?force=1' : ''}`,
                     { method: 'DELETE' }
                   ),
                 { refreshBackend: true }
@@ -1211,7 +1224,7 @@
         }
 
         if (releases.length === 0) {
-          elBackendReleasesBody.appendChild(emptyRow(7, '暂无后端版本'))
+          elBackendReleasesBody.appendChild(emptyRow(7, '暂无 Edge Backend 版本'))
         }
       }
 
@@ -1290,7 +1303,7 @@
         }
 
         if (environments.length === 0) {
-          elBackendEnvironmentsBody.appendChild(emptyRow(10, '暂无后端环境配置'))
+          elBackendEnvironmentsBody.appendChild(emptyRow(10, '暂无 Edge Backend 环境配置'))
         }
       }
 
@@ -1373,7 +1386,7 @@
         elCompatibilityNotes.value = ''
 
         try {
-          const record = await api(`/admin/backend-compatibility/${encodeURIComponent(version)}`)
+          const record = await api(`/admin/subjects/edge_backend/compatibility/${encodeURIComponent(version)}`)
           elCompatibilityMinVersion.value = record.desktopMinVersion || ''
           elCompatibilityRecommendedVersion.value = record.desktopRecommendedVersion || ''
           elCompatibilityMaxVersion.value = record.desktopMaxVersion || ''
@@ -1389,7 +1402,7 @@
       }
 
       async function openEnvironmentModal(environmentId) {
-        const record = await api(`/admin/backend-environments/${encodeURIComponent(environmentId)}`)
+        const record = await api(`/admin/subjects/edge_backend/environments/${encodeURIComponent(environmentId)}`)
         const resolvedList = (state.backend.environments && state.backend.environments.environments) || []
         const resolved = resolvedList.find((item) => item.environmentId === environmentId)
 
@@ -1486,9 +1499,9 @@
           (async () => {
             if (!confirm('确认将 testing 回滚到上一版本？')) return
             await runAction(
-              '后端 testing 回滚',
+              'Edge Backend testing 回滚',
               () =>
-                api('/admin/backend-channels/testing/rollback', {
+                api('/admin/subjects/edge_backend/channels/testing/rollback', {
                   method: 'POST',
                   body: JSON.stringify({})
                 }),
@@ -1496,7 +1509,7 @@
             )
           })()
         ).catch((error) => {
-          handleUiError(error, '后端 testing 回滚')
+          handleUiError(error, 'Edge Backend testing 回滚')
         })
       })
 
@@ -1505,9 +1518,9 @@
           (async () => {
             if (!confirm('确认将 stable 回滚到上一版本？')) return
             await runAction(
-              '后端 stable 回滚',
+              'Edge Backend stable 回滚',
               () =>
-                api('/admin/backend-channels/stable/rollback', {
+                api('/admin/subjects/edge_backend/channels/stable/rollback', {
                   method: 'POST',
                   body: JSON.stringify({})
                 }),
@@ -1515,7 +1528,7 @@
             )
           })()
         ).catch((error) => {
-          handleUiError(error, '后端 stable 回滚')
+          handleUiError(error, 'Edge Backend stable 回滚')
         })
       })
 
@@ -1550,9 +1563,9 @@
             }
 
             await runAction(
-              `保存后端版本 ${version} 的兼容策略`,
+              `保存 Edge Backend 版本 ${version} 的兼容策略`,
               () =>
-                api(`/admin/backend-compatibility/${encodeURIComponent(version)}`, {
+                api(`/admin/subjects/edge_backend/compatibility/${encodeURIComponent(version)}`, {
                   method: 'PUT',
                   body: JSON.stringify(body)
                 }),
@@ -1589,7 +1602,7 @@
             await runAction(
               `保存环境 ${environmentId}`,
               () =>
-                api(`/admin/backend-environments/${encodeURIComponent(environmentId)}`, {
+                api(`/admin/subjects/edge_backend/environments/${encodeURIComponent(environmentId)}`, {
                   method: 'PUT',
                   headers: { 'x-uname-actor': 'admin-ui' },
                   body: JSON.stringify(body)
@@ -1621,7 +1634,7 @@
             await runAction(
               `创建环境 ${environmentId} 的部署任务`,
               () =>
-                api('/admin/backend-deployments', {
+                api('/admin/subjects/edge_backend/deployments', {
                   method: 'POST',
                   body: JSON.stringify(body)
                 }),

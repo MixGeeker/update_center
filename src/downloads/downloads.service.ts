@@ -96,11 +96,11 @@ async function pathExists(path: string): Promise<boolean> {
 
 @Injectable()
 export class DownloadsService {
-  private readonly paths = resolveUpdateStoragePaths()
+  private readonly desktopPaths = resolveUpdateStoragePaths().desktopSubject
 
   private async readStableState(): Promise<{ currentVersion?: string; updatedAt?: string } | undefined> {
     try {
-      const raw = await fs.readFile(this.paths.stableStateFile, 'utf-8')
+      const raw = await fs.readFile(this.desktopPaths.stableStateFile, 'utf-8')
       const parsed = JSON.parse(raw) as { currentVersion?: unknown; updatedAt?: unknown } | undefined
       return {
         currentVersion: typeof parsed?.currentVersion === 'string' ? parsed.currentVersion : undefined,
@@ -113,7 +113,7 @@ export class DownloadsService {
 
   private getChannelDir(channelInput: string): { channel: string; channelDir: string } {
     const channel = normalizeChannel(channelInput)
-    const channelDir = join(this.paths.channelsDir, channel)
+    const channelDir = join(this.desktopPaths.channelsDir, channel)
     return { channel, channelDir }
   }
 
@@ -217,4 +217,3 @@ export class DownloadsService {
     return { platform, url: info.url }
   }
 }
-

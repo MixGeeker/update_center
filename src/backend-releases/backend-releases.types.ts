@@ -70,7 +70,7 @@ export interface BackendCompatibilityPolicy {
 
 export interface BackendReleaseManifest {
   schemaVersion: 1
-  service: 'local_server'
+  service: string
   version: string
   uploadedAt: string
   channelHint: 'draft' | BackendChannel
@@ -80,7 +80,7 @@ export interface BackendReleaseManifest {
     sizeBytes: number
     tag?: string
     repository?: string
-    platform: 'linux/arm64'
+    platform: string
   }
   checksums?: {
     fileName: string
@@ -175,6 +175,19 @@ export interface BackendDeploymentRecord {
   manifestDownloadUrl?: string
   checksumsDownloadUrl?: string
   compatibility?: BackendCompatibilityPolicy
+}
+
+export interface BackendReleasesServiceOptions {
+  subjectId: string
+  displayName: string
+  serviceName: string
+  artifactBasePath: string
+  defaultServices: string[]
+  supportsCompatibility: boolean
+  defaultEnvironmentId: string
+  defaultEnvironmentActor?: string
+  environmentFileName?: string
+  imagePlatform: string
 }
 
 

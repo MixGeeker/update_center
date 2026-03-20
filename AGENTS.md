@@ -35,7 +35,7 @@ docker compose logs -f update-center
 ```
 
 ## 3. 开发约定（更新链路相关）
-- **接口兼容优先**：`/api/admin/*`、`/api/downloads/*` 字段改动要考虑管理面板与现网脚本兼容性。
+- **以当前 `subject` 标准接口为准**：研发阶段不保留旧 `backend-*` 专用接口；若改动 `/api/admin/subjects/*`、`/api/internal/subjects/*`、`/api/downloads/*`，必须同步更新管理面板、脚本与 `README.md`。
 - **路径安全优先**：涉及版本号/目录名时，沿用现有安全校验（如 `validateVersionSafe`）；禁止路径穿越、禁止拼接未校验输入。
 - **稳定通道语义保持**：
   - `promoteStable` 发布时保持 `previousVersions` 回滚链去重与长度限制。
@@ -47,12 +47,13 @@ docker compose logs -f update-center
 - 至少执行：`npm run build`（确保 TS 编译通过）。
 - 涉及更新流程改动时，至少手工验证：
   - `GET /api/health`
-  - `GET /api/admin/channels`（带 token）
-  - `POST /api/admin/channels/stable/promote`（带 token）
+  - `GET /api/admin/subjects`（带 token）
+  - `GET /api/admin/subjects/desktop_app/channels`（带 token）
+  - `GET /api/admin/subjects/edge_backend/channels`（带 token）
+  - `POST /api/admin/subjects/desktop_app/channels/stable/promote`（带 token）
   - `GET /api/downloads/stable/latest`
 
 ## 5. 变更边界与文档同步
 - 不要手工改 `dist/`、不要提交 `node_modules/`。
 - 任何会影响部署、目录结构、环境变量、对外接口的改动，必须同步更新 `README.md`。
 - 若新增模块内专项规范，可在子目录继续放置更近层级的 `AGENTS.md`，就近覆盖。
-
